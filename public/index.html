@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamUp – Team Formation Platform</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="portal-select">
+    <div class="brand">TeamUp</div>
+    <p class="tagline">Team Formation Platform</p>
+    <div style="display:flex;flex-direction:column;gap:16px;width:100%;max-width:320px;">
+      <button class="btn btn-primary" onclick="go('STUDENT')">Student Portal</button>
+      <button class="btn btn-secondary" onclick="go('TEACHER')">Teacher Portal</button>
+    </div>
+  </div>
+  <script src="api.js"></script>
+  <script>
+    // If already logged in, redirect to dashboard
+    get('/api/auth/me').then(user => {
+      window.location = user.role === 'STUDENT' ? '/student.html' : '/teacher.html';
+    }).catch(() => {});
+
+    function go(role) {
+      window.location = `/login.html?role=${role}`;
+    }
+  </script>
+</body>
+</html>

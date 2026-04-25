@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamUp – Complete Your Profile</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <span class="logo">TeamUp</span>
+    <span class="title">🎓 Complete Your Profile</span>
+  </div>
+  <div class="content-center">
+    <div class="card" style="max-width:480px;">
+      <div>
+        <h2 style="font-size:24px;margin-bottom:4px;">Tell us a bit about yourself</h2>
+        <p class="subtitle-text">This helps other students find the right teammates.</p>
+      </div>
+      <div class="field-group">
+        <label>Display Name</label>
+        <input id="displayName" type="text" placeholder="Your full name">
+      </div>
+      <div class="field-group">
+        <label>Major</label>
+        <input id="major" type="text" placeholder="e.g. Computer Science">
+      </div>
+      <div class="field-group">
+        <label>Units Passed</label>
+        <input id="units" type="number" placeholder="e.g. 48" min="0">
+      </div>
+      <div class="field-group">
+        <label>Tutorial Availability <span class="muted" style="font-size:11px;">(click to select multiple)</span></label>
+        <div class="list-select" id="tutorialList"></div>
+      </div>
+      <div class="error-text" id="errorMsg"></div>
+      <button class="btn btn-primary" onclick="doContinue()">Continue to Dashboard →</button>
+    </div>
+  </div>
+</div>
+<script src="api.js"></script>
+<script>
+  (async () => {
+    const user = await requireSession('STUDENT');
+    if (!user) return;
+    document.getElementById('displayName').value = user.displayName || '';
+    const listEl = document.getElementById('tutorialList');
+    listEl.innerHTML = buildTutorialList(user.tutorialAvailability ? user.tutorialAvailability.split(',') : []);
+    initTutorialList(listEl);
+  })();
+
+  async function doContinue() {
+    const displayName = document.getElementById('displayName').value.trim();
+    const major       = document.getElementById('major').value.trim();
+    const units       = document.getElementById('units').value.trim();
+    const slots       = getSelectedSlots(document.getElementById('tutorialList'));
+    const errEl       = document.getElementById('errorMsg');
+    errEl.textContent = '';
+    if (!displayName || !major || !units) { errEl.textContent = 'All fields are required.'; return; }
+    if (slots.length === 0) { errEl.textContent = 'Please select at least one tutorial slot.'; return; }
+    if (isNaN(parseInt(units, 10))) { errEl.textContent = 'Units passed must be a number.'; return; }
+    try {
+      await post('/api/students/onboarding', {
+        displayName, tutorialAvailability: slots, major, unitsPassed: parseInt(units, 10)
+      });
+      window.location = '/student.html';
+    } catch (e) { errEl.textContent = e.message; }
+  }
+</script>
+</body>
+</html>

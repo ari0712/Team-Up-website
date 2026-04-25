@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamUp – Teacher Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="dashboard">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="logo" style="color:#0f9b58;">TeamUp</div>
+    <div class="subtitle">Teacher Portal</div>
+    <hr>
+    <button class="nav-btn active-green" id="btn-allteams"    onclick="showPanel('allteams')">📊  All Teams</button>
+    <button class="nav-btn"             id="btn-incomplete"  onclick="showPanel('incomplete')">⚠  Incomplete Teams</button>
+    <div class="spacer"></div>
+    <hr>
+    <button class="nav-btn logout-green" onclick="doLogout()">⬅  Logout</button>
+  </div>
+
+  <!-- Main content -->
+  <div class="main-content" id="mainContent"></div>
+</div>
+
+<script src="api.js"></script>
+<script>
+let currentPanel = 'allteams';
+
+(async () => {
+  await requireSession('TEACHER');
+  showPanel('allteams');
+})();
+
+function setActive(id) {
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    b.classList.remove('active-green');
+  });
+  document.getElementById('btn-' + id).classList.add('active-green');
+}
+
+function showPanel(name) {
+  currentPanel = name;
+  setActive(name);
+  if (name === 'allteams') renderAllTeams();
+  else renderIncomplete();
+}
+
+async function doLogout() {
+  await post('/api/auth/logout', {});
+  window.location = '/';
+}
+
+// ── ALL TEAMS ─────────────────────────────────────────
+async function renderAllTeams() {
+  const cont = document.getElementById('mainContent');
+  cont.innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">
+      <h2 class="page-title" style="margin:0;">All Teams</h2>
+      <span class="muted" style="font-size:13px;" id="summaryLabel"></span>
+    </div>
+    <div class="table-wrap" id="allTeamsWrap"><div class="table-placeholder">Loading…</div></div>`;
+  try {
+    const teams = await get('/api/teams/all');
+    const complete = teams.filter(t => t.isComplete).length;
+    document.getElementById('summaryLabel').textContent =
+      `${teams.length} total  ·  ${complete} complete  ·  ${teams.length - complete} forming`;
+
+    document.getElementById('allTeamsWrap').innerHTML = buildTable([
+      { label: 'Team ID', key: 'teamId' },
+      { label: 'Members', key: 'memberCount' },
+      { label: 'Status',  render: t => statusBadge(t.status) },
+      { label: 'Member Names', render: t => t.members.map(m => m.displayName || m.username).join(', ') }
+    ], teams);
+  } catch(e) {
+    document.getElementById('allTeamsWrap').innerHTML = `<div class="table-placeholder">${e.message}</div>`;
+  }
+}
+
+// ── INCOMPLETE TEAMS ──────────────────────────────────
+async function renderIncomplete() {
+  const cont = document.getElementById('mainContent');
+  cont.innerHTML = `
+    <div style="margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:16px;">
+        <h2 class="page-title" style="margin:0;">Incomplete Teams</h2>
+        <span style="color:#ffc107;font-size:13px;font-weight:600;" id="incompleteCount"></span>
+      </div>
+      <p class="muted" style="font-size:13px;margin-top:6px;">
+        Teams with fewer than 4 students — these students still need teammates.
+      </p>
+    </div>
+    <div class="table-wrap" id="incompleteWrap"><div class="table-placeholder">Loading…</div></div>`;
+  try {
+    const teams = await get('/api/teams/incomplete');
+    document.getElementById('incompleteCount').textContent = `${teams.length} team(s) need more members`;
+
+    if (teams.length === 0) {
+      document.getElementById('incompleteWrap').innerHTML =
+        `<div class="table-placeholder"><span style="color:#4caf50;font-size:16px;">🎉 All teams are complete!</span></div>`;
+      return;
+    }
+
+    document.getElementById('incompleteWrap').innerHTML = buildTable([
+      { label: 'Team ID',          key: 'teamId' },
+      { label: 'Members',          render: t => {
+          const color = t.memberCount === 1 ? '#e94560' : '#ffc107';
+          return `<span style="color:${color};font-weight:bold;">${t.memberCount}</span>`;
+      }},
+      { label: 'Still Need',       render: t => Math.max(0, 4 - t.memberCount) },
+      { label: 'Current Members',  render: t => t.members.map(m => m.displayName || m.username).join(', ') }
+    ], teams);
+  } catch(e) {
+    document.getElementById('incompleteWrap').innerHTML = `<div class="table-placeholder">${e.message}</div>`;
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamUp – Student Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="dashboard">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="logo">TeamUp</div>
+    <div class="subtitle" id="greetingLabel">Hello, Student</div>
+    <hr>
+    <button class="nav-btn active" id="btn-find"        onclick="showPanel('find')">🔍  Find Teammates</button>
+    <button class="nav-btn"        id="btn-invites"     onclick="showPanel('invites')">📩  Team Invites</button>
+    <button class="nav-btn"        id="btn-myteam"      onclick="showPanel('myteam')">👥  My Team</button>
+    <button class="nav-btn"        id="btn-status"      onclick="showPanel('status')">📊  Team Status</button>
+    <button class="nav-btn"        id="btn-editprofile" onclick="showPanel('editprofile')">✏  Edit Profile</button>
+    <div class="spacer"></div>
+    <hr>
+    <button class="nav-btn logout" onclick="doLogout()">⬅  Logout</button>
+  </div>
+
+  <!-- Main content -->
+  <div class="main-content" id="mainContent"></div>
+</div>
+
+<!-- Reject Invite Modal -->
+<div class="modal-overlay hidden" id="rejectModal">
+  <div class="modal">
+    <h3>Reject Invite</h3>
+    <p>Please provide a reason for rejecting this invite (required).</p>
+    <textarea id="rejectReason" placeholder="Enter your reason..."></textarea>
+    <div class="error-text" id="rejectError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline btn-sm" onclick="hideModal('rejectModal')">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="confirmReject()">Reject Invite</button>
+    </div>
+  </div>
+</div>
+
+<!-- Accept Confirm Modal -->
+<div class="modal-overlay hidden" id="acceptModal">
+  <div class="modal">
+    <h3>Already in a Team</h3>
+    <p id="acceptModalMsg">If you accept this invite, you will leave your current team. Continue?</p>
+    <div class="modal-actions">
+      <button class="btn btn-outline btn-sm" onclick="hideModal('acceptModal')">Cancel</button>
+      <button class="btn btn-success btn-sm" onclick="confirmAccept()">Accept & Switch Teams</button>
+    </div>
+  </div>
+</div>
+
+<!-- Leave Team Modal -->
+<div class="modal-overlay hidden" id="leaveModal">
+  <div class="modal">
+    <h3>Leave Team</h3>
+    <p id="leaveModalMsg">Are you sure you want to leave your team? You will need a new invite to join another team.</p>
+    <div class="modal-actions">
+      <button class="btn btn-outline btn-sm" onclick="hideModal('leaveModal')">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="confirmLeave()">Leave Team</button>
+    </div>
+  </div>
+</div>
+
+<!-- View Profile Modal -->
+<div class="modal-overlay hidden" id="profileModal">
+  <div class="modal">
+    <h3 id="profileModalName"></h3>
+    <div id="profileModalBody" style="color:#a8a8b3;font-size:14px;line-height:1.9;margin-bottom:20px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline btn-sm" onclick="hideModal('profileModal')">Close</button>
+      <button class="btn btn-primary btn-sm" onclick="sendInviteFromProfile()">Send Invite</button>
+    </div>
+  </div>
+</div>
+
+<script src="api.js"></script>
+<script>
+let currentUser = null;
+let currentPanel = 'find';
+let selectedInviteId = null;
+let selectedStudentUsername = null;
+let studentRows = [];
+let receivedInvites = [];
+
+// ── Init ──────────────────────────────────────────────
+(async () => {
+  currentUser = await requireSession('STUDENT');
+  if (!currentUser) return;
+  document.getElementById('greetingLabel').textContent = 'Hello, ' + (currentUser.displayName || currentUser.username);
+  showPanel('find');
+})();
+
+function setActive(id) {
+  document.querySelectorAll('.nav-btn').forEach(b => {
+    b.classList.remove('active');
+  });
+  document.getElementById('btn-' + id).classList.add('active');
+}
+
+function showPanel(name) {
+  currentPanel = name;
+  setActive(name);
+  const panels = { find: renderFind, invites: renderInvites, myteam: renderMyTeam, status: renderStatus, editprofile: renderEditProfile };
+  if (panels[name]) panels[name]();
+}
+
+async function doLogout() {
+  await post('/api/auth/logout', {});
+  window.location = '/';
+}
+
+// ── FIND TEAMMATES ────────────────────────────────────
+async function renderFind() {
+  document.getElementById('mainContent').innerHTML = `
+    <h2 class="page-title">Find Teammates</h2>
+    <div class="filter-bar" style="margin-top:16px;">
+      <input id="fName"     placeholder="Search by name…"  style="flex:1;min-width:120px;">
+      <input id="fTutorial" placeholder="Tutorial slot…"   style="flex:1;min-width:120px;">
+      <input id="fMajor"    placeholder="Major…"           style="flex:1;min-width:100px;">
+      <select id="fSort">
+        <option value="name">Sort: Name</option>
+        <option value="units">Sort: Units (High→Low)</option>
+      </select>
+      <button class="btn btn-primary btn-sm" onclick="loadStudents()">Search</button>
+    </div>
+    <div class="table-wrap" id="studentTableWrap" style="margin-bottom:12px;">
+      <div class="table-placeholder">Loading…</div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;">
+      <span class="muted" style="font-size:13px;" id="studentCount"></span>
+      <button class="btn btn-outline btn-sm" onclick="viewProfile()">👤 View Profile</button>
+      <button class="btn btn-primary btn-sm" onclick="sendInvite()">✉ Send Invite</button>
+    </div>`;
+  document.getElementById('fName').addEventListener('keydown', e => { if (e.key === 'Enter') loadStudents(); });
+  await loadStudents();
+}
+
+async function loadStudents() {
+  const name     = document.getElementById('fName')?.value || '';
+  const tutorial = document.getElementById('fTutorial')?.value || '';
+  const major    = document.getElementById('fMajor')?.value || '';
+  const sort     = document.getElementById('fSort')?.value || 'name';
+  const wrap     = document.getElementById('studentTableWrap');
+  if (!wrap) return;
+  try {
+    studentRows = await get(`/api/students?name=${encodeURIComponent(name)}&tutorial=${encodeURIComponent(tutorial)}&major=${encodeURIComponent(major)}&sort=${sort}`);
+    document.getElementById('studentCount').textContent = studentRows.length + ' student(s) found';
+    wrap.innerHTML = buildTable([
+      { label: 'Name',     key: 'displayName' },
+      { label: 'Tutorial', render: r => (r.tutorialAvailability || '').replace(/,/g, ', ') },
+      { label: 'Major',    key: 'major' },
+      { label: 'Units',    key: 'unitsPassed' },
+      { label: 'Status',   render: r => r.teamId
+          ? '<span class="muted">In Team</span>'
+          : '<span class="status-available">Available</span>' }
+    ], studentRows);
+    // Row click selection
+    wrap.querySelectorAll('tbody tr').forEach((tr, i) => {
+      tr.addEventListener('click', () => {
+        wrap.querySelectorAll('tbody tr').forEach(r => r.classList.remove('selected'));
+        tr.classList.add('selected');
+        selectedStudentUsername = studentRows[i].username;
+      });
+    });
+  } catch(e) { wrap.innerHTML = `<div class="table-placeholder">${e.message}</div>`; }
+}
+
+function getSelectedStudent() {
+  if (!selectedStudentUsername) return null;
+  return studentRows.find(s => s.username === selectedStudentUsername) || null;
+}
+
+function viewProfile() {
+  const s = getSelectedStudent();
+  if (!s) { toast('Select a student first.', 'error'); return; }
+  document.getElementById('profileModalName').textContent = s.displayName || s.username;
+  document.getElementById('profileModalBody').innerHTML = `
+    <div><strong>Username:</strong> ${s.username}</div>
+    <div><strong>Email:</strong> ${s.email || '—'}</div>
+    <div><strong>Tutorial:</strong> ${(s.tutorialAvailability || '—').replace(/,/g,', ')}</div>
+    <div><strong>Major:</strong> ${s.major || '—'}</div>
+    <div><strong>Units:</strong> ${s.unitsPassed}</div>
+    <div><strong>Status:</strong> ${s.teamId ? 'In a team' : 'Looking for team'}</div>`;
+  showModal('profileModal');
+}
+
+async function sendInviteFromProfile() {
+  hideModal('profileModal');
+  await sendInvite();
+}
+
+async function sendInvite() {
+  const s = getSelectedStudent();
+  if (!s) { toast('Select a student to invite.', 'error'); return; }
+  try {
+    await post('/api/invites/send', { receiverUsername: s.username });
+    toast('Invite sent to ' + (s.displayName || s.username) + '!');
+    await loadStudents();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── INVITES ───────────────────────────────────────────
+async function renderInvites() {
+  document.getElementById('mainContent').innerHTML = `
+    <h2 class="page-title">Team Invites</h2>
+    <div class="tabs" style="margin-top:16px;">
+      <button class="tab-btn active" id="tab-received" onclick="switchTab('received')">Received</button>
+      <button class="tab-btn"        id="tab-sent"     onclick="switchTab('sent')">Sent</button>
+    </div>
+    <div id="inviteContent"></div>`;
+  await switchTab('received');
+}
+
+let activeTab = 'received';
+async function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (tab === 'received') await renderReceived();
+  else await renderSent();
+}
+
+async function renderReceived() {
+  const cont = document.getElementById('inviteContent');
+  try {
+    receivedInvites = await get('/api/invites/received');
+    cont.innerHTML = `
+      <div class="table-wrap" id="receivedWrap" style="margin-bottom:12px;"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;">
+        <button class="btn btn-success btn-sm" onclick="acceptInvite()">✔ Accept</button>
+        <button class="btn btn-danger btn-sm"  onclick="openReject()">✘ Reject</button>
+      </div>`;
+    document.getElementById('receivedWrap').innerHTML = buildTable([
+      { label: 'From',   key: 'senderUsername' },
+      { label: 'Sent',   key: 'sentAt' },
+      { label: 'Status', render: r => statusBadge(r.status) }
+    ], receivedInvites);
+    document.querySelectorAll('#receivedWrap tbody tr').forEach((tr, i) => {
+      tr.addEventListener('click', () => {
+        document.querySelectorAll('#receivedWrap tbody tr').forEach(r => r.classList.remove('selected'));
+        tr.classList.add('selected');
+        selectedInviteId = receivedInvites[i].inviteId;
+      });
+    });
+  } catch(e) { cont.innerHTML = `<div class="error-text">${e.message}</div>`; }
+}
+
+async function renderSent() {
+  const cont = document.getElementById('inviteContent');
+  try {
+    const sent = await get('/api/invites/sent');
+    cont.innerHTML = `<div class="table-wrap"></div>`;
+    cont.querySelector('.table-wrap').innerHTML = buildTable([
+      { label: 'To',             key: 'receiverUsername' },
+      { label: 'Sent',           key: 'sentAt' },
+      { label: 'Status',         render: r => statusBadge(r.status) },
+      { label: 'Rejection Note', render: r => r.rejectionReason || '' }
+    ], sent);
+  } catch(e) { cont.innerHTML = `<div class="error-text">${e.message}</div>`; }
+}
+
+async function acceptInvite() {
+  if (!selectedInviteId) { toast('Select an invite to accept.', 'error'); return; }
+  const invite = receivedInvites.find(i => i.inviteId === selectedInviteId);
+  if (!invite) return;
+  if (invite.status !== 'PENDING') { toast('This invite is no longer pending.', 'error'); return; }
+  try {
+    const { existingTeamId } = await get(`/api/invites/${selectedInviteId}/check-accept`);
+    if (existingTeamId) {
+      document.getElementById('acceptModalMsg').textContent =
+        `You are already in team ${existingTeamId}. If you accept, you will leave your current team. Continue?`;
+      showModal('acceptModal');
+    } else {
+      await doAccept();
+    }
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function confirmAccept() {
+  hideModal('acceptModal');
+  await doAccept();
+}
+
+async function doAccept() {
+  try {
+    await post(`/api/invites/${selectedInviteId}/accept`, {});
+    currentUser = await get('/api/auth/me');
+    toast('Invite accepted! You have joined the team.');
+    selectedInviteId = null;
+    await renderReceived();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+function openReject() {
+  if (!selectedInviteId) { toast('Select an invite to reject.', 'error'); return; }
+  const invite = receivedInvites.find(i => i.inviteId === selectedInviteId);
+  if (!invite) return;
+  if (invite.status !== 'PENDING') { toast('This invite is no longer pending.', 'error'); return; }
+  document.getElementById('rejectReason').value = '';
+  document.getElementById('rejectError').textContent = '';
+  showModal('rejectModal');
+}
+
+async function confirmReject() {
+  const reason = document.getElementById('rejectReason').value.trim();
+  if (!reason) { document.getElementById('rejectError').textContent = 'A rejection reason is required.'; return; }
+  try {
+    await post(`/api/invites/${selectedInviteId}/reject`, { reason });
+    hideModal('rejectModal');
+    toast('Invite rejected.');
+    selectedInviteId = null;
+    await renderReceived();
+  } catch(e) { document.getElementById('rejectError').textContent = e.message; }
+}
+
+// ── MY TEAM ───────────────────────────────────────────
+async function renderMyTeam() {
+  const cont = document.getElementById('mainContent');
+  cont.innerHTML = `<h2 class="page-title">My Team</h2><div style="margin-top:16px;" id="myTeamBody"><div class="muted">Loading…</div></div>`;
+  try {
+    const team = await get('/api/teams/current');
+    const body = document.getElementById('myTeamBody');
+    if (!team) {
+      body.innerHTML = `
+        <div class="table-placeholder" style="margin-top:40px;">
+          <p style="font-size:16px;margin-bottom:8px;">You're not in a team yet.</p>
+          <p class="muted">Go to Find Teammates to send invites.</p>
+        </div>`;
+      return;
+    }
+    const statusColor = team.isComplete ? '#4caf50' : '#ffc107';
+    body.innerHTML = `
+      <div class="info-card" style="margin-bottom:20px;">
+        <div class="info-item"><label>Team ID</label><p>${team.teamId}</p></div>
+        <div class="info-item"><label>Status</label><p style="color:${statusColor}">${team.status}</p></div>
+        <div class="info-item"><label>Members</label><p>${team.memberCount} / 4-5</p></div>
+      </div>
+      <h3 class="section-title">Team Members</h3>
+      <div class="table-wrap" style="margin-bottom:14px;">
+        ${buildTable([
+          { label: 'Name',     key: 'displayName' },
+          { label: 'Major',    key: 'major' },
+          { label: 'Tutorial', render: r => (r.tutorialAvailability || '').replace(/,/g,', ') },
+          { label: 'Units',    key: 'unitsPassed' }
+        ], team.members)}
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="openLeaveModal('${team.teamId}')">Leave Team</button>`;
+  } catch(e) {
+    document.getElementById('myTeamBody').innerHTML = `<div class="error-text">${e.message}</div>`;
+  }
+}
+
+function openLeaveModal(teamId) {
+  document.getElementById('leaveModalMsg').textContent =
+    `Are you sure you want to leave team ${teamId}? You will need a new invite to join another team.`;
+  showModal('leaveModal');
+}
+
+async function confirmLeave() {
+  hideModal('leaveModal');
+  try {
+    await post('/api/teams/leave', {});
+    currentUser = await get('/api/auth/me');
+    toast('You have left the team.');
+    await renderMyTeam();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+// ── TEAM STATUS ───────────────────────────────────────
+async function renderStatus() {
+  const cont = document.getElementById('mainContent');
+  cont.innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">
+      <h2 class="page-title" style="margin:0;">Team Status</h2>
+      <span style="color:#a8a8b3;font-size:13px;">
+        <span style="color:#e94560;">●</span> = Your team
+      </span>
+    </div>
+    <div class="table-wrap" id="statusWrap"><div class="table-placeholder">Loading…</div></div>`;
+  try {
+    const teams = await get('/api/teams/all');
+    const myTeamId = currentUser.teamId;
+    document.getElementById('statusWrap').innerHTML = buildTable([
+      { label: 'Team ID', key: 'teamId' },
+      { label: 'Members', render: t => t.members.map(m => m.displayName || m.username).join(', ') },
+      { label: 'Count',   key: 'memberCount' },
+      { label: 'Status',  render: t => statusBadge(t.status) }
+    ], teams, { highlightFn: t => t.teamId === myTeamId });
+  } catch(e) {
+    document.getElementById('statusWrap').innerHTML = `<div class="table-placeholder">${e.message}</div>`;
+  }
+}
+
+// ── EDIT PROFILE ──────────────────────────────────────
+async function renderEditProfile() {
+  const cont = document.getElementById('mainContent');
+  cont.innerHTML = `
+    <h2 class="page-title" style="margin-bottom:20px;">Edit Profile</h2>
+    <div style="max-width:480px;display:flex;flex-direction:column;gap:18px;">
+      <div class="field-group"><label>Display Name</label>
+        <input id="ep-name" type="text"></div>
+      <div class="field-group"><label>Email</label>
+        <input id="ep-email" type="email"></div>
+      <div class="field-group"><label>Major</label>
+        <input id="ep-major" type="text"></div>
+      <div class="field-group"><label>Units Passed</label>
+        <input id="ep-units" type="number" min="0"></div>
+      <div class="field-group">
+        <label>Tutorial Availability <span class="muted" style="font-size:11px;">(click to select multiple)</span></label>
+        <div class="list-select" id="ep-tutorial"></div>
+      </div>
+      <div class="error-text" id="ep-status"></div>
+      <button class="btn btn-primary" style="max-width:480px;" onclick="saveProfile()">Save Changes</button>
+    </div>`;
+
+  const u = await get('/api/auth/me');
+  document.getElementById('ep-name').value  = u.displayName || '';
+  document.getElementById('ep-email').value = u.email || '';
+  document.getElementById('ep-major').value = u.major || '';
+  document.getElementById('ep-units').value = u.unitsPassed || 0;
+
+  const saved = u.tutorialAvailability ? u.tutorialAvailability.split(',').map(s => s.trim()) : [];
+  const listEl = document.getElementById('ep-tutorial');
+  listEl.innerHTML = buildTutorialList(saved);
+  initTutorialList(listEl);
+}
+
+async function saveProfile() {
+  const displayName = document.getElementById('ep-name').value.trim();
+  const email       = document.getElementById('ep-email').value.trim();
+  const major       = document.getElementById('ep-major').value.trim();
+  const units       = document.getElementById('ep-units').value.trim();
+  const slots       = getSelectedSlots(document.getElementById('ep-tutorial'));
+  const statusEl    = document.getElementById('ep-status');
+  statusEl.textContent = '';
+
+  if (!displayName || !email || !major || !units) {
+    statusEl.textContent = 'All fields are required.'; return;
+  }
+  if (slots.length === 0) {
+    statusEl.textContent = 'Please select at least one tutorial slot.'; return;
+  }
+  if (isNaN(parseInt(units, 10))) {
+    statusEl.textContent = 'Units passed must be a number.'; return;
+  }
+  try {
+    await put('/api/students/profile', {
+      displayName, email, tutorialAvailability: slots,
+      major, unitsPassed: parseInt(units, 10)
+    });
+    currentUser = await get('/api/auth/me');
+    document.getElementById('greetingLabel').textContent = 'Hello, ' + (currentUser.displayName || currentUser.username);
+    statusEl.className = 'success-text';
+    statusEl.textContent = 'Profile saved successfully!';
+  } catch(e) {
+    statusEl.className = 'error-text';
+    statusEl.textContent = e.message;
+  }
+}
+</script>
+</body>
+</html>

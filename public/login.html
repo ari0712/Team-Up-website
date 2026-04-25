@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamUp – Login</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <button class="back-btn" onclick="window.location='/'">← Back</button>
+    <span class="logo">TeamUp</span>
+    <span class="title" id="portalLabel">Student Portal</span>
+  </div>
+  <div class="content-center">
+    <div class="card">
+      <div>
+        <h2 style="font-size:28px;margin-bottom:4px;">Welcome back</h2>
+        <p class="subtitle-text">Sign in to continue</p>
+      </div>
+      <div class="field-group">
+        <label>Username</label>
+        <input id="username" type="text" placeholder="Enter username" autocomplete="username">
+      </div>
+      <div class="field-group">
+        <label>Password</label>
+        <input id="password" type="password" placeholder="Enter password" autocomplete="current-password">
+      </div>
+      <div class="error-text" id="errorMsg"></div>
+      <button class="btn btn-primary" onclick="doLogin()">Login</button>
+      <div class="row" style="justify-content:center;gap:6px;">
+        <span class="muted" style="font-size:13px;">Don't have an account?</span>
+        <button class="link-btn" onclick="goSignUp()">Sign Up</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="api.js"></script>
+<script>
+  const params = new URLSearchParams(location.search);
+  const role = params.get('role') || 'STUDENT';
+  document.getElementById('portalLabel').textContent = role === 'STUDENT' ? 'Student Portal' : 'Teacher Portal';
+
+  document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+  async function doLogin() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    const errEl = document.getElementById('errorMsg');
+    errEl.textContent = '';
+    if (!username || !password) { errEl.textContent = 'Please enter your username and password.'; return; }
+    try {
+      const user = await post('/api/auth/login', { username, password, role });
+      if (user.role === 'STUDENT') {
+        window.location = (!user.major || !user.major.trim()) ? '/onboarding.html' : '/student.html';
+      } else {
+        window.location = '/teacher.html';
+      }
+    } catch (e) { errEl.textContent = e.message; }
+  }
+
+  function goSignUp() { window.location = `/signup.html?role=${role}`; }
+</script>
+</body>
+</html>

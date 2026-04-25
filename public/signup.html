@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamUp – Sign Up</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <button class="back-btn" id="backBtn">← Back</button>
+    <span class="logo">TeamUp</span>
+    <span class="title" id="portalLabel">Create Account</span>
+  </div>
+  <div class="content-center">
+    <div class="card">
+      <h2 style="font-size:26px;">Create your account</h2>
+      <div class="field-group">
+        <label>Username</label>
+        <input id="username" type="text" placeholder="Choose a username" autocomplete="username">
+      </div>
+      <div class="field-group">
+        <label>Email</label>
+        <input id="email" type="email" placeholder="your@email.com" autocomplete="email">
+      </div>
+      <div class="field-group">
+        <label>Password</label>
+        <input id="password" type="password" placeholder="Choose a password" autocomplete="new-password">
+      </div>
+      <div class="field-group">
+        <label>Confirm Password</label>
+        <input id="confirmPassword" type="password" placeholder="Repeat password" autocomplete="new-password">
+      </div>
+      <div class="error-text" id="errorMsg"></div>
+      <button class="btn btn-primary" onclick="doSignUp()">Create Account</button>
+    </div>
+  </div>
+</div>
+<script src="api.js"></script>
+<script>
+  const params = new URLSearchParams(location.search);
+  const role = params.get('role') || 'STUDENT';
+  document.getElementById('portalLabel').textContent =
+    role === 'STUDENT' ? 'Student – Create Account' : 'Teacher – Create Account';
+  document.getElementById('backBtn').onclick = () => window.location = `/login.html?role=${role}`;
+
+  async function doSignUp() {
+    const username = document.getElementById('username').value.trim();
+    const email    = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+    const errEl = document.getElementById('errorMsg');
+    errEl.textContent = '';
+    if (!username || !email || !password) { errEl.textContent = 'All fields are required.'; return; }
+    if (password !== confirmPassword) { errEl.textContent = 'Passwords do not match.'; return; }
+    try {
+      const user = await post('/api/auth/signup', { username, email, password, confirmPassword, role });
+      window.location = user.role === 'STUDENT' ? '/onboarding.html' : '/teacher.html';
+    } catch (e) { errEl.textContent = e.message; }
+  }
+</script>
+</body>
+</html>
