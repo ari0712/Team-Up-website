@@ -1,0 +1,171 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --brand-dark:   #3d4f6e;
+  --brand-blue:   #4a7fd4;
+  --brand-mid:    #5b9bd5;
+  --brand-light:  #7ab3e0;
+
+  --bg-main:      #daeaf7;
+  --bg-card:      #ffffff;
+  --border-card:  #4a7fd4;
+
+  --text-heading: #2c3e55;
+  --text-body:    #5a7a9a;
+  --text-footer:  #8aabbf;
+
+  --btn-bg:       #4a7fd4;
+  --btn-hover:    #3a6fc4;
+  --btn-text:     #ffffff;
+
+  --radius-card:  14px;
+  --radius-btn:   8px;
+  --radius-icon:  10px;
+
+  --shadow-card:  0 4px 24px rgba(74, 127, 212, 0.12);
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  font-family: 'Ramabhadra', sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-body);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+header {
+  background: #ffffff;
+  border-bottom: 2.5px solid var(--brand-blue);
+  padding: 18px 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.logo-icon {
+  width: 52px;
+  height: 44px;
+  flex-shrink: 0;
+}
+
+.logo-text {
+  font-family: 'Ramabhadra', sans-serif;
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+.logo-text .team { color: var(--brand-dark); }
+.logo-text .up   { color: var(--brand-blue); }
+
+/* Main */
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  gap: 32px;
+}
+
+/* Portal Card */
+.portal-card {
+  background: var(--bg-card);
+  border: 2px solid var(--border-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 28px 32px 28px 28px;
+  width: 100%;
+  max-width: 520px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+/* Icon badge */
+.icon-badge {
+  width: 48px;
+  height: 48px;
+  background: #ffffff;
+  border: 2px solid var(--brand-mid);
+  border-radius: var(--radius-icon);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.card-title {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: var(--text-heading);
+  letter-spacing: -0.2px;
+}
+
+.card-desc {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-body);
+  line-height: 1.65;
+  margin-bottom: 24px;
+}
+
+/* Button */
+.btn-portal {
+  display: block;
+  width: 100%;
+  padding: 12px 0;
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  font-family: 'Nunito', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-align: center;
+  border: none;
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.18s ease, transform 0.12s ease, box-shadow 0.18s ease;
+}
+
+.btn-portal:hover {
+  background: var(--btn-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(74, 127, 212, 0.3);
+}
+
+.btn-portal:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* Responsive */
+@media (max-width: 560px) {
+  header { padding: 16px 20px; }
+  .logo-text { font-size: 1.7rem; }
+  .portal-card { padding: 22px 20px; }
+  main { padding: 40px 16px; }
+}
