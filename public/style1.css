@@ -1,3 +1,4 @@
+/* Resize */
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -6,19 +7,19 @@
 
 :root {
   --brand-dark:   #3d4f6e;
-  --brand-blue:   #4a7fd4;
-  --brand-mid:    #5b9bd5;
+  --brand-blue:   #2663ff;
+  --brand-mid:    #2663ff;
   --brand-light:  #7ab3e0;
 
-  --bg-main:      #daeaf7;
+  --bg-main:      #d3ecf5;
   --bg-card:      #ffffff;
-  --border-card:  #4a7fd4;
+  --border-card:  #2663ff;
 
   --text-heading: #2c3e55;
   --text-body:    #5a7a9a;
   --text-footer:  #8aabbf;
 
-  --btn-bg:       #4a7fd4;
+  --btn-bg:       #2663ff;
   --btn-hover:    #3a6fc4;
   --btn-text:     #ffffff;
 
@@ -140,7 +141,7 @@ main {
   padding: 12px 0;
   background: var(--btn-bg);
   color: var(--btn-text);
-  font-family: 'Nunito', sans-serif;
+  font-family: 'Ramabhadra', sans-serif;
   font-size: 0.95rem;
   font-weight: 700;
   text-align: center;
