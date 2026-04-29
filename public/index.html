@@ -1,20 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TeamUp – Team Formation Platform</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TeamUp</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Ramabhadra&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style1.css" />
 </head>
 <body>
-  <div class="portal-select">
-    <div class="brand">TeamUp</div>
-    <p class="tagline">Team Formation Platform</p>
-    <div style="display:flex;flex-direction:column;gap:16px;width:100%;max-width:320px;">
-      <button class="btn btn-primary" onclick="go('STUDENT')">Student Portal</button>
-      <button class="btn btn-secondary" onclick="go('TEACHER')">Teacher Portal</button>
+
+  <!-- Header -->
+  <header>
+    <a href="index.html" class="logo" aria-label="TeamUp Home">
+      <!-- logo -->
+      <img src="teamup-icon.png" alt="" class="logo-icon" aria-hidden="true" />
+      <span class="logo-text">
+        <span class="team">Team</span><span class="up">Up</span>
+      </span>
+    </a>
+  </header>
+
+  <!-- ── Main Content ── -->
+  <main>
+
+    <!-- Teacher Portal Card -->
+    <div class="portal-card">
+      <div class="card-header">
+        <div class="icon-badge">
+          <!-- icon -->
+          <img src="graduation-cap.png" alt="Graduation cap" class="icon-badge" />
+        </div>
+        <h2 class="card-title">Teacher Portal</h2>
+      </div>
+      <p class="card-desc">
+        Create TeamUp instances for your Unit, Manage Group Formation Constraints,
+        Set Due Dates and Automatically Generate Optimal Team Formations in One Click.
+      </p>
+      <a href="teacher.html" class="btn-portal">Access Teacher Portal</a>
     </div>
-  </div>
+
+    <!-- Student Portal Card -->
+    <div class="portal-card">
+      <div class="card-header">
+        <div class="icon-badge">
+          <!-- icon -->
+          <img src="graduation-cap.png" alt="Graduation cap" class="icon-badge" />
+        </div>
+        <h2 class="card-title">Student Portal</h2>
+      </div>
+      <p class="card-desc">
+        Customise Profile, Join a Group and Connect with other Students in your Unit.
+      </p>
+      <a href="student.html" class="btn-portal">Access Student Portal</a>
+    </div>
+
+  </main>
   <script src="api.js"></script>
   <script>
     // If already logged in, redirect to dashboard
