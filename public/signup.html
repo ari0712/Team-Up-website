@@ -55,7 +55,7 @@
     if (password !== confirmPassword) { errEl.textContent = 'Passwords do not match.'; return; }
     try {
       const user = await post('/api/auth/signup', { username, email, password, confirmPassword, role });
-      window.location = user.role === 'STUDENT' ? '/onboarding.html' : '/teacher.html';
+      window.location = user.role === 'STUDENT' ? '/onboarding.html' : '/teacher-home.html';
     } catch (e) { errEl.textContent = e.message; }
   }
 </script>

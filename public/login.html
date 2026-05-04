@@ -54,7 +54,7 @@
       if (user.role === 'STUDENT') {
         window.location = (!user.major || !user.major.trim()) ? '/onboarding.html' : '/student.html';
       } else {
-        window.location = '/teacher.html';
+        window.location = '/teacher-home.html';
       }
     } catch (e) { errEl.textContent = e.message; }
   }

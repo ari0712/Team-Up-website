@@ -21,6 +21,7 @@ app.use('/api/auth',     require('./routes/auth'));
 app.use('/api/students', require('./routes/students'));
 app.use('/api/invites',  require('./routes/invites'));
 app.use('/api/teams',    require('./routes/teams'));
+app.use('/api/units',    require('./routes/units'));
 
 // All other GETs serve index.html (the portal select page handles routing)
 app.get('*', (req, res) => {
