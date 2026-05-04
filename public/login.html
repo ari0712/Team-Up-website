@@ -52,7 +52,7 @@
     try {
       const user = await post('/api/auth/login', { username, password, role });
       if (user.role === 'STUDENT') {
-        window.location = (!user.major || !user.major.trim()) ? '/onboarding.html' : '/student.html';
+        window.location = (!user.major || !user.major.trim()) ? '/onboarding.html' : '/student-home.html';
       } else {
         window.location = '/teacher-home.html';
       }
