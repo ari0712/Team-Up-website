@@ -63,7 +63,7 @@
       await post('/api/students/onboarding', {
         displayName, tutorialAvailability: slots, major, unitsPassed: parseInt(units, 10)
       });
-      window.location = '/student.html';
+      window.location = '/student-home.html';
     } catch (e) { errEl.textContent = e.message; }
   }
 </script>

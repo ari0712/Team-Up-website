@@ -1,7 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { all, run, get } = require('../db');
-const { requireTeacher } = require('../middleware/auth');
+const { requireTeacher, requireStudent } = require('../middleware/auth');
 const crypto = require('crypto');
 
 // ── GET /api/units — list teacher's units ────────────────────────
@@ -130,6 +130,20 @@ router.put('/:unitId/progress/:studentId', requireTeacher, (req, res) => {
         [value ? 1 : 0, req.params.unitId, req.params.studentId]
     );
     res.json({ ok: true });
+});
+
+// ── GET /api/units/student/enrolled — units the logged-in student belongs to ──
+router.get('/student/enrolled', requireStudent, (req, res) => {
+    const studentId = req.session.user.username;
+    const units = all(
+        `SELECT u.unit_id, u.unit_name, u.description, u.semester
+         FROM units u
+         INNER JOIN unit_students us ON us.unit_id = u.unit_id
+         WHERE us.student_id = ?
+         ORDER BY u.rowid DESC`,
+        [studentId]
+    );
+    res.json(units);
 });
 
 module.exports = router;
