@@ -53,6 +53,22 @@ async function initDb() {
     FOREIGN KEY (receiver_username) REFERENCES users(username)
   )`);
 
+  db.run(`CREATE TABLE IF NOT EXISTS units (
+  unit_id               TEXT PRIMARY KEY,
+  unit_name             TEXT NOT NULL,
+  description           TEXT DEFAULT '',
+  semester              TEXT DEFAULT '',
+  created_by            TEXT NOT NULL,
+  valid_team_sizes      TEXT DEFAULT '4',
+  max_one_group         INTEGER DEFAULT 1,
+  must_share_tutorial   INTEGER DEFAULT 1,
+  max_new_to_qut        INTEGER DEFAULT 2,
+  student_count         INTEGER DEFAULT 0,
+  teams_generated       INTEGER DEFAULT 0,
+  students_in_teams     INTEGER DEFAULT 0,
+  FOREIGN KEY (created_by) REFERENCES users(username)
+)`);
+
   save();
   return db;
 }
