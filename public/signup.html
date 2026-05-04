@@ -16,8 +16,8 @@
     <div class="card">
       <h2 style="font-size:26px;">Create your account</h2>
       <div class="field-group">
-        <label>Username</label>
-        <input id="username" type="text" placeholder="Choose a username" autocomplete="username">
+        <label id="usernameLabel">Username</label>
+        <input id="username" type="text" id="username" autocomplete="username">
       </div>
       <div class="field-group">
         <label>Email</label>
@@ -40,19 +40,35 @@
 <script>
   const params = new URLSearchParams(location.search);
   const role = params.get('role') || 'STUDENT';
-  document.getElementById('portalLabel').textContent =
-    role === 'STUDENT' ? 'Student – Create Account' : 'Teacher – Create Account';
+
+  if (role === 'STUDENT') {
+    document.getElementById('portalLabel').textContent = 'Student – Create Account';
+    document.getElementById('usernameLabel').textContent = 'Student ID';
+    document.getElementById('username').placeholder = 'e.g. n12345678';
+  } else {
+    document.getElementById('portalLabel').textContent = 'Teacher – Create Account';
+    document.getElementById('usernameLabel').textContent = 'Username';
+    document.getElementById('username').placeholder = 'Choose a username';
+  }
+
   document.getElementById('backBtn').onclick = () => window.location = `/login.html?role=${role}`;
 
   async function doSignUp() {
-    const username = document.getElementById('username').value.trim();
-    const email    = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
+    const username        = document.getElementById('username').value.trim();
+    const email           = document.getElementById('email').value.trim();
+    const password        = document.getElementById('password').value;
     const confirmPassword = document.getElementById('confirmPassword').value;
-    const errEl = document.getElementById('errorMsg');
+    const errEl           = document.getElementById('errorMsg');
     errEl.textContent = '';
-    if (!username || !email || !password) { errEl.textContent = 'All fields are required.'; return; }
+
+    if (!username || !email || !password) {
+      errEl.textContent = role === 'STUDENT'
+              ? 'Student ID, email and password are required.'
+              : 'All fields are required.';
+      return;
+    }
     if (password !== confirmPassword) { errEl.textContent = 'Passwords do not match.'; return; }
+
     try {
       const user = await post('/api/auth/signup', { username, email, password, confirmPassword, role });
       window.location = user.role === 'STUDENT' ? '/onboarding.html' : '/teacher-home.html';
