@@ -69,6 +69,37 @@ async function initDb() {
   FOREIGN KEY (created_by) REFERENCES users(username)
 )`);
 
+  // ── ADDITION 1: add deadline column to existing units table (safe if already exists)
+  try { db.run(`ALTER TABLE units ADD COLUMN deadline TEXT DEFAULT ''`); } catch(e) {}
+
+// ── ADDITION 2: students imported from CSV per unit
+  db.run(`CREATE TABLE IF NOT EXISTS unit_students (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  unit_id          TEXT NOT NULL,
+  student_id       TEXT NOT NULL,
+  name             TEXT DEFAULT '',
+  tutorial_time    TEXT DEFAULT '',
+  is_new_to_qut    INTEGER DEFAULT 0,
+  degree           TEXT DEFAULT '',
+  major            TEXT DEFAULT '',
+  minor            TEXT DEFAULT '',
+  units_passed     INTEGER DEFAULT 0,
+  it_skill_groups  TEXT DEFAULT '',
+  UNIQUE(unit_id, student_id),
+  FOREIGN KEY (unit_id) REFERENCES units(unit_id)
+)`);
+
+// ── ADDITION 3: 4-stage progress tracking per student per unit
+  db.run(`CREATE TABLE IF NOT EXISTS student_progress (
+  unit_id              TEXT NOT NULL,
+  student_id           TEXT NOT NULL,
+  read_rules           INTEGER DEFAULT 0,
+  entered_preferences  INTEGER DEFAULT 0,
+  in_team              INTEGER DEFAULT 0,
+  submitted_request    INTEGER DEFAULT 0,
+  PRIMARY KEY (unit_id, student_id)
+)`);
+
   save();
   return db;
 }
