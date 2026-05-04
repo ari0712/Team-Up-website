@@ -13,6 +13,20 @@ router.get('/', requireTeacher, (req, res) => {
     res.json(units);
 });
 
+// ── GET /api/units/student/enrolled ──────────────────────────────
+router.get('/student/enrolled', requireStudent, (req, res) => {
+    const studentId = req.session.user.username;
+    const units = all(
+        `SELECT u.unit_id, u.unit_name, u.description, u.semester
+         FROM units u
+         INNER JOIN unit_students us ON us.unit_id = u.unit_id
+         WHERE us.student_id = ?
+         ORDER BY u.rowid DESC`,
+        [studentId]
+    );
+    res.json(units);
+});
+
 // ── GET /api/units/:unitId — single unit ─────────────────────────
 router.get('/:unitId', requireTeacher, (req, res) => {
     const unit = get(
@@ -132,18 +146,5 @@ router.put('/:unitId/progress/:studentId', requireTeacher, (req, res) => {
     res.json({ ok: true });
 });
 
-// ── GET /api/units/student/enrolled — units the logged-in student belongs to ──
-router.get('/student/enrolled', requireStudent, (req, res) => {
-    const studentId = req.session.user.username;
-    const units = all(
-        `SELECT u.unit_id, u.unit_name, u.description, u.semester
-         FROM units u
-         INNER JOIN unit_students us ON us.unit_id = u.unit_id
-         WHERE us.student_id = ?
-         ORDER BY u.rowid DESC`,
-        [studentId]
-    );
-    res.json(units);
-});
 
 module.exports = router;

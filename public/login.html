@@ -19,7 +19,7 @@
         <p class="subtitle-text">Sign in to continue</p>
       </div>
       <div class="field-group">
-        <label>Username</label>
+        <label id="usernameLabel">Username</label>
         <input id="username" type="text" placeholder="Enter username" autocomplete="username">
       </div>
       <div class="field-group">
@@ -39,6 +39,10 @@
 <script>
   const params = new URLSearchParams(location.search);
   const role = params.get('role') || 'STUDENT';
+  if (role === 'STUDENT') {
+    document.getElementById('usernameLabel').textContent = 'Student ID';
+    document.getElementById('username').placeholder = 'e.g. n12345678';
+  }
   document.getElementById('portalLabel').textContent = role === 'STUDENT' ? 'Student Portal' : 'Teacher Portal';
 
   document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
