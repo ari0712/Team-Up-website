@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TeamUp – Create Unit</title>
+    <title>TeamUp – Teacher Dashboard</title>
     <link rel="stylesheet" href="style1.css">
     <link rel="stylesheet" href="teacher-style.css">
 </head>
@@ -11,7 +11,7 @@
 <header class="t-header">
     <button class="t-logout-btn" onclick="doLogout()">Log Out</button>
     <div class="t-header-title">
-        <h1>Teacher Home</h1>
+        <h1>Teacher Dashboard</h1>
         <p>Welcome, <span id="teacherName"></span>!</p>
     </div>
     <a class="logo" href="#">
@@ -22,171 +22,132 @@
     </a>
 </header>
 
-<main class="t-main">
-    <div class="t-create-card">
-        <h2 class="t-create-title">Create Unit Instance</h2>
+<div class="t-dashboard-layout">
 
-        <div class="t-field-row">
-            <label class="t-label">Unit Name:</label>
-            <input class="t-input" id="unitName" type="text" placeholder="e.g. IFB398">
-        </div>
-        <div class="t-field-row">
-            <label class="t-label">Description:</label>
-            <input class="t-input t-input-wide" id="description" type="text" placeholder="e.g. IT Capstone Project">
-        </div>
-        <div class="t-field-row">
-            <label class="t-label">Semester:</label>
-            <input class="t-input" id="semester" type="text" placeholder="e.g. 2026 Semester 1">
-        </div>
-        <div class="t-field-row">
-            <label class="t-label">Deadline:</label>
-            <input class="t-input t-input-wide" id="deadline" type="datetime-local">
+    <!-- Left sidebar -->
+    <nav class="t-sidebar-nav">
+        <a class="t-snav-link" href="/teacher-home.html">Home</a>
+        <button class="t-snav-active">Dashboard</button>
+        <span class="t-snav-link t-snav-disabled">Team Formation</span>
+        <span class="t-snav-link t-snav-disabled">Class List</span>
+        <span class="t-snav-link t-snav-disabled">Announcements</span>
+    </nav>
+
+    <!-- Middle content -->
+    <main class="t-dash-content">
+
+        <!-- Deadline banner -->
+        <div class="t-deadline-banner">
+            <div class="t-deadline-text">
+                <div class="t-deadline-heading">Deadline</div>
+                <div class="t-deadline-date" id="deadlineDate">–</div>
+                <div class="t-deadline-remaining" id="deadlineRemaining"></div>
+            </div>
+            <div class="t-warning-circle">!</div>
         </div>
 
-        <h3 class="t-section-title">Rule Set</h3>
-        <div class="t-ruleset">
-            <div class="t-rule-box t-size-box">
-                <p class="t-rule-label">Team Size:</p>
-                <div class="t-num-grid" id="teamSizeGrid"></div>
-            </div>
-            <div class="t-rule-right">
-                <div class="t-rule-box t-toggle-box" onclick="toggleRule('maxOneGroup')">
-                    <span>Max One Group Per Student:</span>
-                    <span class="t-tick" id="tick-maxOneGroup">✓</span>
-                </div>
-                <div class="t-rule-box t-toggle-box" onclick="toggleRule('mustShare')">
-                    <span>Students Must Share Tutorial Time:</span>
-                    <span class="t-tick" id="tick-mustShare">✓</span>
-                </div>
-            </div>
-            <div class="t-rule-box t-qut-box">
-                <p class="t-rule-label">Maximum new-to-QUT Students Per Group:</p>
-                <div class="t-num-grid" id="newQutGrid"></div>
+        <!-- Unit detail + carousel -->
+        <div class="t-carousel-row">
+            <button class="t-carousel-chevron">‹</button>
+            <div class="t-unit-info-card">
+                <h3 class="t-unit-info-title" id="unitInfoTitle">Loading…</h3>
+                <span class="t-badge-ruleset">Group Rule Set</span>
+                <ul class="t-rules-list" id="rulesList"></ul>
+                <button class="t-edit-rules-btn" id="editRulesBtn">Edit Rule Set</button>
             </div>
         </div>
 
-        <div class="t-bottom-row">
-            <div class="t-csv-row">
-                <label class="t-label">Student List CSV:</label>
-                <button class="t-csv-btn" onclick="document.getElementById('csvFile').click()">
-                    ADD FILE (.CSV)
-                </button>
-                <input type="file" id="csvFile" accept=".csv" style="display:none" onchange="onCsvSelected(this)">
-                <span class="t-csv-name" id="csvName"></span>
-                <span class="t-csv-count" id="csvCount"></span>
-            </div>
-            <button class="t-create-btn" onclick="doCreate()">Create</button>
-        </div>
-        <div class="t-error" id="errorMsg"></div>
-    </div>
-</main>
+    </main>
+
+    <!-- Vertical dashed divider -->
+    <div class="t-vert-divider"></div>
+
+    <!-- Right progress panel -->
+    <aside class="t-progress-aside">
+        <h2 class="t-progress-heading">Team Formation Progress</h2>
+        <div id="progressRows" class="t-progress-rows"></div>
+        <button class="t-view-progress-btn">View Progress</button>
+    </aside>
+
+</div>
 
 <footer class="t-footer">High Fidelity Design Concept.</footer>
 
 <script src="api.js"></script>
 <script>
-    const FIXED_COLS = ['student_id','name','tutorial_time','is_new_to_qut',
-        'degree','major','minor','units_passed'];
-    const state = {
-        teamSizes: new Set([4, 5]),
-        maxOneGroup: true,
-        mustShare: true,
-        maxNewToQut: 2,
-        students: []
-    };
+    const params = new URLSearchParams(location.search);
+    const unitId = params.get('unitId');
 
     (async () => {
         const user = await requireSession('TEACHER');
         if (!user) return;
         document.getElementById('teacherName').textContent = user.username;
-        buildGrids();
+        if (!unitId) { window.location = '/teacher-home.html'; return; }
+        await Promise.all([loadUnit(), loadProgress()]);
     })();
 
-    function buildGrids() {
-        buildNumGrid('teamSizeGrid', 1, 6, 'size', n => state.teamSizes.has(n));
-        buildNumGrid('newQutGrid',   1, 6, 'qut',  n => n === state.maxNewToQut);
-    }
+    async function loadUnit() {
+        try {
+            const u = await get(`/api/units/${unitId}`);
 
-    function buildNumGrid(id, min, max, type, isSel) {
-        document.getElementById(id).innerHTML =
-            Array.from({length: max - min + 1}, (_,i) => i + min).map(n => {
-                const s = isSel(n);
-                return `<div class="t-num-cell ${s?'selected':''}"
-                   onclick="toggleNum('${type}',${n})">
-                ${n}${s?' ✓':''}
-              </div>`;
-            }).join('');
-    }
+            // Header title: "IFB398 IT Capstone Project Semester 1"
+            document.getElementById('unitInfoTitle').textContent =
+                [u.unit_name, u.description, u.semester].filter(Boolean).join(' ');
 
-    function toggleNum(type, val) {
-        if (type === 'size') {
-            state.teamSizes.has(val) ? state.teamSizes.delete(val) : state.teamSizes.add(val);
-        } else {
-            state.maxNewToQut = val;
-        }
-        buildGrids();
-    }
+            // Deadline countdown
+            if (u.deadline) {
+                const d       = new Date(u.deadline);
+                const dayName = d.toLocaleDateString('en-AU', { weekday: 'long' });
+                const time    = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
+                document.getElementById('deadlineDate').textContent = `${dayName} , ${time}`;
 
-    function toggleRule(rule) {
-        state[rule] = !state[rule];
-        document.getElementById(`tick-${rule}`).style.visibility = state[rule] ? 'visible' : 'hidden';
-    }
-
-    function onCsvSelected(input) {
-        const file = input.files[0];
-        if (!file) return;
-        document.getElementById('csvName').textContent = file.name;
-
-        const reader = new FileReader();
-        reader.onload = e => {
-            const lines = e.target.result.split('\n').filter(l => l.trim());
-            if (lines.length < 2) { document.getElementById('csvCount').textContent = '(empty)'; return; }
-
-            // Normalise headers to snake_case
-            const headers = lines[0].split(',').map(h =>
-                h.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
-            );
-            const itCols = headers.filter(h => !FIXED_COLS.includes(h));
-
-            state.students = [];
-            for (let i = 1; i < lines.length; i++) {
-                const vals = lines[i].split(',').map(v => v.trim());
-                const row  = {};
-                headers.forEach((h, idx) => { row[h] = vals[idx] || ''; });
-                // IT skill groups: collect column names where student has a non-zero value
-                row.it_skill_groups = itCols.filter(c => row[c] && row[c] !== '0').join(',');
-                state.students.push(row);
+                const diffDays = Math.ceil((d - new Date()) / 86400000);
+                document.getElementById('deadlineRemaining').textContent =
+                    diffDays > 0  ? `${diffDays} day${diffDays !== 1 ? 's' : ''} remaining`
+                        : diffDays === 0 ? 'Due today!'
+                            : 'Past deadline';
             }
 
-            document.getElementById('csvCount').textContent =
-                `${state.students.length} student${state.students.length !== 1 ? 's' : ''} loaded`;
-        };
-        reader.readAsText(file);
+            // Build rules list from stored settings
+            const sizes = (u.valid_team_sizes || '4').split(',').map(Number).sort((a,b) => a-b);
+            const rules = [];
+            if (sizes.length === 1) rules.push(`Team must have ${sizes[0]} students`);
+            else rules.push(`Team must have ${sizes[0]}–${sizes[sizes.length-1]} students`);
+            if (u.max_one_group)       rules.push('Every student can only be in one team');
+            if (u.must_share_tutorial) rules.push('All members must share at least one tutorial');
+            if (u.max_new_to_qut > 0) rules.push(`Maximum ${u.max_new_to_qut} new-to-QUT students in one team`);
+
+            document.getElementById('rulesList').innerHTML = rules.map(r => `<li>✓ ${r}</li>`).join('');
+            document.getElementById('editRulesBtn').onclick = () =>
+                alert('Edit Rule Set — wire this up when you build the edit page.');
+
+        } catch(e) { console.error('loadUnit:', e); }
     }
 
-    async function doCreate() {
-        const unitName    = document.getElementById('unitName').value.trim();
-        const description = document.getElementById('description').value.trim();
-        const semester    = document.getElementById('semester').value.trim();
-        const deadline    = document.getElementById('deadline').value;
-        const errEl       = document.getElementById('errorMsg');
-        errEl.textContent = '';
-
-        if (!unitName)          { errEl.textContent = 'Unit name is required.'; return; }
-        if (!deadline)          { errEl.textContent = 'Please set a deadline.'; return; }
-        if (!state.teamSizes.size) { errEl.textContent = 'Select at least one team size.'; return; }
-
+    async function loadProgress() {
         try {
-            await post('/api/units', {
-                unitName, description, semester, deadline,
-                validTeamSizes: [...state.teamSizes].sort((a,b)=>a-b).join(','),
-                maxOneGroup:       state.maxOneGroup,
-                mustShareTutorial: state.mustShare,
-                maxNewToQut:       state.maxNewToQut,
-                students:          state.students
-            });
-            window.location = '/teacher-home.html';
-        } catch (e) { errEl.textContent = e.message; }
+            const p     = await get(`/api/units/${unitId}/progress`);
+            const total = p.total || 0;
+
+            const stages = [
+                { label: 'Read rules',           count: p.readRules },
+                { label: 'Enter preferences',    count: p.enteredPrefs },
+                { label: 'Build or join team',   count: p.inTeam },
+                { label: 'Submit team request',  count: p.submittedRequest }
+            ];
+
+            document.getElementById('progressRows').innerHTML = stages.map(s => {
+                const done = total > 0 && s.count >= total;
+                return `
+        <div class="t-progress-row">
+          <div class="t-dot ${done ? 't-dot-green' : 't-dot-red'}"></div>
+          <span class="t-progress-label">${s.label}</span>
+          <span class="t-progress-stat ${done ? 'green' : 'red'}">
+            ${s.count} / ${total} ${done ? 'Completed' : 'In Progress'}
+          </span>
+        </div>`;
+            }).join('');
+        } catch(e) { console.error('loadProgress:', e); }
     }
 
     async function doLogout() {
