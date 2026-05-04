@@ -303,3 +303,220 @@ body.t-page {
     margin-top: 8px;
     min-height: 18px;
 }
+
+/* ═══════════════════════════════════════════════════════
+   Teacher Dashboard Layout
+═══════════════════════════════════════════════════════ */
+
+.t-dashboard-layout {
+    display: flex;
+    flex: 1;
+    min-height: calc(100vh - 82px); /* 82px = approx header height */
+}
+
+/* ── Sidebar nav ── */
+.t-sidebar-nav {
+    width: 185px;
+    background: white;
+    border-right: 1.5px solid #d0ddf0;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 0;
+    flex-shrink: 0;
+}
+
+.t-snav-link {
+    display: block;
+    padding: 14px 26px;
+    font-size: 16px;
+    font-weight: 700;
+    color: #1a2a4a;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 0.12s;
+}
+.t-snav-link:hover { background: #f0f5ff; }
+
+.t-snav-disabled { color: #8aabbf; cursor: default; }
+.t-snav-disabled:hover { background: none; }
+
+.t-snav-active {
+    display: block;
+    margin: 4px 16px;
+    padding: 10px 16px;
+    background: #2663ff;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: default;
+    text-align: left;
+    width: calc(100% - 32px);
+}
+
+/* ── Middle content ── */
+.t-dash-content {
+    flex: 1;
+    padding: 24px 28px;
+    background: #d3ecf5;
+    overflow-y: auto;
+}
+
+/* ── Deadline banner ── */
+.t-deadline-banner {
+    background: linear-gradient(130deg, #e8635a 0%, #d44c42 100%);
+    border-radius: 14px;
+    padding: 22px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+.t-deadline-heading {
+    font-size: 38px;
+    font-weight: 900;
+    color: white;
+    font-style: italic;
+    line-height: 1;
+    margin-bottom: 6px;
+}
+.t-deadline-date, .t-deadline-remaining {
+    color: rgba(255,255,255,0.92);
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 3px;
+}
+.t-warning-circle {
+    width: 74px;
+    height: 74px;
+    border-radius: 50%;
+    background: #c0281a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 42px;
+    font-weight: 900;
+    color: white;
+    flex-shrink: 0;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.28);
+}
+
+/* ── Carousel row ── */
+.t-carousel-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.t-carousel-chevron {
+    width: 34px;
+    height: 34px;
+    background: rgba(255,255,255,0.8);
+    border: 1.5px solid #b0c8e0;
+    border-radius: 50%;
+    font-size: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: #3d4f6e;
+    transition: background 0.12s;
+}
+.t-carousel-chevron:hover { background: white; }
+
+/* ── Unit info card ── */
+.t-unit-info-card {
+    flex: 1;
+    background: white;
+    border: 1.5px solid #d0ddf0;
+    border-radius: 12px;
+    padding: 20px 24px;
+}
+.t-unit-info-title {
+    font-size: 19px;
+    font-weight: 800;
+    color: #1a2a4a;
+    margin-bottom: 10px;
+}
+.t-badge-ruleset {
+    display: inline-block;
+    background: #f5c518;
+    color: #3a2a00;
+    font-size: 13px;
+    font-weight: 800;
+    padding: 5px 14px;
+    border-radius: 6px;
+    margin-bottom: 14px;
+}
+.t-rules-list { list-style: none; margin-bottom: 16px; }
+.t-rules-list li { font-size: 14px; color: #2a3a4a; padding: 3px 0; }
+.t-edit-rules-btn {
+    display: inline-block;
+    background: #2663ff;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 28px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.t-edit-rules-btn:hover { background: #1a4fcc; }
+
+/* ── Vertical dashed divider ── */
+.t-vert-divider {
+    width: 2px;
+    background: repeating-linear-gradient(
+            to bottom,
+            #7ab3e0 0px, #7ab3e0 8px,
+            transparent 8px, transparent 16px
+    );
+    margin: 20px 0;
+    align-self: stretch;
+}
+
+/* ── Progress aside panel ── */
+.t-progress-aside {
+    width: 310px;
+    padding: 28px 24px;
+    background: #d3ecf5;
+    flex-shrink: 0;
+}
+.t-progress-heading {
+    font-size: 22px;
+    font-weight: 900;
+    color: #1a2a4a;
+    margin-bottom: 22px;
+    line-height: 1.2;
+}
+.t-progress-rows { display: flex; flex-direction: column; gap: 14px; margin-bottom: 26px; }
+.t-progress-row  { display: flex; align-items: center; gap: 10px; }
+.t-dot           { width: 13px; height: 13px; border-radius: 50%; flex-shrink: 0; }
+.t-dot-green     { background: #22c55e; }
+.t-dot-red       { background: #e94560; }
+.t-progress-label{ flex: 1; font-size: 14px; font-weight: 600; color: #1a2a4a; }
+.t-progress-stat { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.t-progress-stat.green { color: #22c55e; }
+.t-progress-stat.red   { color: #e94560; }
+
+.t-view-progress-btn {
+    display: block;
+    width: 100%;
+    background: #2663ff;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+    text-align: center;
+}
+.t-view-progress-btn:hover { background: #1a4fcc; }
+
+/* ── Create form additions ── */
+.t-input-wide { width: 320px; }
+.t-csv-count  { font-size: 13px; color: #22c55e; font-weight: 600; }
