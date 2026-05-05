@@ -15,9 +15,16 @@
   <div class="content-center">
     <div class="card">
       <h2 style="font-size:26px;">Create your account</h2>
+
+      <!-- Student ID — only shown for students -->
+      <div class="field-group" id="studentIdGroup" style="display:none">
+        <label>Student ID</label>
+        <input id="studentId" type="text" placeholder="e.g. n12345678">
+      </div>
+
       <div class="field-group">
-        <label id="usernameLabel">Username</label>
-        <input id="username" type="text" id="username" autocomplete="username">
+        <label>Username</label>
+        <input id="username" type="text" placeholder="Choose a username" autocomplete="username">
       </div>
       <div class="field-group">
         <label>Email</label>
@@ -31,48 +38,59 @@
         <label>Confirm Password</label>
         <input id="confirmPassword" type="password" placeholder="Repeat password" autocomplete="new-password">
       </div>
+
       <div class="error-text" id="errorMsg"></div>
       <button class="btn btn-primary" onclick="doSignUp()">Create Account</button>
     </div>
   </div>
 </div>
+
 <script src="api.js"></script>
 <script>
   const params = new URLSearchParams(location.search);
   const role = params.get('role') || 'STUDENT';
 
+  // Set page label
+  document.getElementById('portalLabel').textContent =
+          role === 'STUDENT' ? 'Student – Create Account' : 'Teacher – Create Account';
+
+  // Show Student ID field only for students
   if (role === 'STUDENT') {
-    document.getElementById('portalLabel').textContent = 'Student – Create Account';
-    document.getElementById('usernameLabel').textContent = 'Student ID';
-    document.getElementById('username').placeholder = 'e.g. n12345678';
-  } else {
-    document.getElementById('portalLabel').textContent = 'Teacher – Create Account';
-    document.getElementById('usernameLabel').textContent = 'Username';
-    document.getElementById('username').placeholder = 'Choose a username';
+    document.getElementById('studentIdGroup').style.display = 'block';
   }
 
-  document.getElementById('backBtn').onclick = () => window.location = `/login.html?role=${role}`;
+  document.getElementById('backBtn').onclick = () =>
+          window.location = `/login.html?role=${role}`;
 
   async function doSignUp() {
-    const username        = document.getElementById('username').value.trim();
-    const email           = document.getElementById('email').value.trim();
-    const password        = document.getElementById('password').value;
+    const studentId      = document.getElementById('studentId').value.trim();
+    const username       = document.getElementById('username').value.trim();
+    const email          = document.getElementById('email').value.trim();
+    const password       = document.getElementById('password').value;
     const confirmPassword = document.getElementById('confirmPassword').value;
-    const errEl           = document.getElementById('errorMsg');
-    errEl.textContent = '';
+    const errEl          = document.getElementById('errorMsg');
+    errEl.textContent    = '';
 
-    if (!username || !email || !password) {
-      errEl.textContent = role === 'STUDENT'
-              ? 'Student ID, email and password are required.'
-              : 'All fields are required.';
-      return;
+    // Validate
+    if (role === 'STUDENT' && !studentId) {
+      errEl.textContent = 'Student ID is required.'; return;
     }
-    if (password !== confirmPassword) { errEl.textContent = 'Passwords do not match.'; return; }
+    if (!username || !email || !password) {
+      errEl.textContent = 'All fields are required.'; return;
+    }
+    if (password !== confirmPassword) {
+      errEl.textContent = 'Passwords do not match.'; return;
+    }
 
     try {
-      const user = await post('/api/auth/signup', { username, email, password, confirmPassword, role });
+      const user = await post('/api/auth/signup', {
+        username, email, password, confirmPassword, role,
+        studentId: role === 'STUDENT' ? studentId : ''
+      });
       window.location = user.role === 'STUDENT' ? '/onboarding.html' : '/teacher-home.html';
-    } catch (e) { errEl.textContent = e.message; }
+    } catch(e) {
+      errEl.textContent = e.message;
+    }
   }
 </script>
 </body>

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authService = require('../services/authService');
+const { run } = require('../db');
 const studentService = require('../services/studentService');
 
 function sanitize(user) {
@@ -29,7 +30,7 @@ router.post('/login', (req, res) => {
 });
 
 router.post('/signup', (req, res) => {
-  const { username, email, password, confirmPassword, role } = req.body;
+  const { username, email, password, confirmPassword, role, studentId } = req.body;
   if (!username || !email || !password || !role)
     return res.status(400).json({ error: 'All fields are required' });
   if (password !== confirmPassword)
@@ -37,6 +38,10 @@ router.post('/signup', (req, res) => {
   if (authService.usernameExists(username))
     return res.status(409).json({ error: 'Username already taken' });
   const user = authService.signUp(username, password, email, role);
+  // Store student_id for future use (students only)
+  if (role === 'STUDENT' && studentId && studentId.trim()) {
+    run(`UPDATE users SET student_id = ? WHERE username = ?`, [studentId.trim(), username]);
+  }
   req.session.user = user;
   res.json(sanitize(user));
 });

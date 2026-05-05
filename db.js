@@ -72,6 +72,8 @@ async function initDb() {
   // ── ADDITION 1: add deadline column to existing units table (safe if already exists)
   try { db.run(`ALTER TABLE units ADD COLUMN deadline TEXT DEFAULT ''`); } catch(e) {}
 
+  try { db.run(`ALTER TABLE users ADD COLUMN student_id TEXT DEFAULT ''`); } catch(e) {}
+
 // ── ADDITION 2: students imported from CSV per unit
   db.run(`CREATE TABLE IF NOT EXISTS unit_students (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
