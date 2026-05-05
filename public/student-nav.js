@@ -49,3 +49,19 @@ async function initStudentNav({ activeItem, pageTitle }) {
 function studentLogout() {
     fetch('/api/auth/logout', { method: 'POST' }).then(() => window.location = '/');
 }
+
+// Guard: call this at the top of any page that requires unit access.
+// Returns the unit data, or redirects to home if not joined.
+async function requireUnitAccess(unitId) {
+    try {
+        const unit = await get(`/api/student/units/${unitId}`);
+        return unit;
+    } catch(e) {
+        // If the API returned NOT_JOINED, redirect to home
+        if (e.message === 'NOT_JOINED' || e.message.includes('NOT_JOINED')) {
+            window.location = '/student-home.html';
+            return null;
+        }
+        throw e;
+    }
+}

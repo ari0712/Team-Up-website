@@ -7,7 +7,15 @@ const crypto = require('crypto');
 // ── GET /api/units — list teacher's units ────────────────────────
 router.get('/', requireTeacher, (req, res) => {
     const units = all(
-        'SELECT * FROM units WHERE created_by = ? ORDER BY rowid DESC',
+        `SELECT u.*,
+            (SELECT COUNT(*) FROM unit_students us WHERE us.unit_id = u.unit_id) AS student_count,
+            (SELECT COUNT(DISTINCT tm.student_id)
+             FROM unit_team_members tm
+             INNER JOIN unit_teams t ON t.team_id = tm.team_id
+             WHERE t.unit_id = u.unit_id AND tm.status = 'ACCEPTED') AS students_in_teams
+         FROM units u
+         WHERE u.created_by = ?
+         ORDER BY u.rowid DESC`,
         [req.session.user.username]
     );
     res.json(units);
@@ -122,8 +130,13 @@ router.get('/:unitId/progress', requireTeacher, (req, res) => {
         [req.params.unitId]
     );
 
+    const liveCount = get(
+        `SELECT COUNT(*) AS cnt FROM unit_students WHERE unit_id = ?`,
+        [req.params.unitId]
+    );
+
     res.json({
-        total:            unit.student_count   || 0,
+        total:            liveCount.cnt        || 0,
         readRules:        stats.readRules      || 0,
         enteredPrefs:     stats.enteredPrefs   || 0,
         inTeam:           stats.inTeam         || 0,
@@ -308,6 +321,36 @@ router.post('/:unitId/announcements', requireTeacher, (req, res) => {
     run(
         `INSERT INTO unit_announcements (unit_id, title, content, created_at) VALUES (?,?,?,?)`,
         [req.params.unitId, title.trim(), (content || '').trim(), new Date().toISOString()]
+    );
+    res.json({ ok: true });
+});
+
+// ── PUT /api/units/:unitId/rules — teacher edits unit rules ──────
+router.put('/:unitId/rules', requireTeacher, (req, res) => {
+    const unit = get(
+        'SELECT * FROM units WHERE unit_id = ? AND created_by = ?',
+        [req.params.unitId, req.session.user.username]
+    );
+    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+    const { validTeamSizes, maxOneGroup, mustShareTutorial, maxNewToQut, deadline } = req.body;
+
+    run(
+        `UPDATE units SET
+            valid_team_sizes    = ?,
+            max_one_group       = ?,
+            must_share_tutorial = ?,
+            max_new_to_qut      = ?,
+            deadline            = ?
+         WHERE unit_id = ?`,
+        [
+            validTeamSizes    || unit.valid_team_sizes,
+            maxOneGroup       !== undefined ? (maxOneGroup ? 1 : 0)       : unit.max_one_group,
+            mustShareTutorial !== undefined ? (mustShareTutorial ? 1 : 0) : unit.must_share_tutorial,
+            parseInt(maxNewToQut) || unit.max_new_to_qut,
+            deadline          || unit.deadline,
+            req.params.unitId
+        ]
     );
     res.json({ ok: true });
 });

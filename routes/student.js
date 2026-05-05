@@ -25,15 +25,55 @@ const sid = req => req.session.user.username;
 //    res.json(units);
 //});
 
-// shows all units to any logged-in student
 router.get('/units', (req, res) => {
     const units = all(
-        `SELECT unit_id, unit_name, description, semester, deadline,
-                valid_team_sizes, max_one_group, must_share_tutorial, max_new_to_qut
-         FROM units
-         ORDER BY rowid DESC`
+        `SELECT u.unit_id, u.unit_name, u.description, u.semester, u.deadline,
+                u.valid_team_sizes, u.max_one_group, u.must_share_tutorial, u.max_new_to_qut,
+                CASE WHEN us.student_id IS NOT NULL THEN 1 ELSE 0 END AS joined
+         FROM units u
+                  LEFT JOIN unit_students us
+                            ON us.unit_id = u.unit_id AND us.student_id = ?
+         ORDER BY u.rowid DESC`,
+        [sid(req)]
     );
     res.json(units);
+});
+
+// ── POST /api/student/units/:unitId/join ──────────────────────────
+router.post('/units/:unitId/join', (req, res) => {
+    const unit = get(`SELECT * FROM units WHERE unit_id = ?`, [req.params.unitId]);
+    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+    // Check not already joined
+    const already = get(
+        `SELECT 1 FROM unit_students WHERE unit_id = ? AND student_id = ?`,
+        [req.params.unitId, sid(req)]
+    );
+    if (already) return res.json({ ok: true, alreadyJoined: true });
+
+    // Get student display name from the students/users table
+    const studentRow = get(
+        `SELECT s.display_name, u.email
+         FROM users u
+         LEFT JOIN students s ON s.username = u.username
+         WHERE u.username = ?`,
+        [sid(req)]
+    );
+    const displayName = studentRow?.display_name || sid(req);
+
+    // Insert into unit_students
+    run(
+        `INSERT INTO unit_students (unit_id, student_id, name) VALUES (?,?,?)`,
+        [req.params.unitId, sid(req), displayName]
+    );
+
+    // Create student_progress row
+    run(
+        `INSERT OR IGNORE INTO student_progress (unit_id, student_id) VALUES (?,?)`,
+        [req.params.unitId, sid(req)]
+    );
+
+    res.json({ ok: true, alreadyJoined: false });
 });
 
 // ── GET /api/student/units/:unitId ────────────────────────────
@@ -44,7 +84,7 @@ router.get('/units/:unitId', (req, res) => {
         `SELECT 1 FROM unit_students WHERE unit_id = ? AND student_id = ?`,
         [req.params.unitId, sid(req)]
     );
-    if (!enrolled) return res.status(403).json({ error: 'Not enrolled in this unit' });
+    if (!enrolled) return res.status(403).json({ error: 'NOT_JOINED' });
 
     const unit = get(`SELECT * FROM units WHERE unit_id = ?`, [req.params.unitId]);
     if (!unit) return res.status(404).json({ error: 'Unit not found' });

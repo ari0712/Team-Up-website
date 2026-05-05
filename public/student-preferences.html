@@ -95,7 +95,8 @@
         unitId = nav.unitId;
 
         // Build tutorial slots from unit data
-        const unit = await get(`/api/student/units/${unitId}`);
+        const unit = await requireUnitAccess(unitId);
+        if (!unit) return;
         // Get unique tutorial times from this unit's student list for the current student
         const myInfo = await get(`/api/student/units/${unitId}`);
         // Use predefined common slots — in a real build, derive from unit_students tutorial_time values

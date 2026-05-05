@@ -62,7 +62,8 @@
         if (!nav) return;
         const { unitId } = nav;
 
-        const unit = await get(`/api/student/units/${unitId}`);
+        const unit = await requireUnitAccess(unitId);
+        if (!unit) return;
         const sizes = (unit.valid_team_sizes || '4').split(',').map(s => s.trim());
         const sizeRange = sizes.length > 1 ? `${sizes[0]}–${sizes[sizes.length-1]}` : sizes[0];
 
