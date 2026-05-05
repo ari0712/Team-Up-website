@@ -47,13 +47,31 @@
             <p class="t-unit-desc">${u.description || ''}</p>
             <p class="t-unit-sem">${u.semester || ''}</p>
           </div>
-          <button class="t-open-btn" onclick="window.location='/student-dashboard.html?unitId=${u.unit_id}'">Open</button>
+          ${u.joined
+                ? `<button class="t-open-btn"
+                 onclick="window.location='/student-dashboard.html?unitId=${u.unit_id}'">
+                 Open
+               </button>`
+                : `<button class="t-open-btn" style="background:#1a2a4a"
+                 onclick="joinUnit('${u.unit_id}')">
+                 Join Unit
+               </button>`
+            }
         </div>
       `).join('');
         } catch(e) {
             grid.innerHTML = `<p class="t-empty">Error: ${e.message}</p>`;
         }
     })();
+    async function joinUnit(unitId) {
+        try {
+            await post(`/api/student/units/${unitId}/join`, {});
+            // Redirect straight to the rules page — first thing a new joiner should see
+            window.location = `/student-rules.html?unitId=${unitId}`;
+        } catch(e) {
+            alert('Could not join unit: ' + e.message);
+        }
+    }
 </script>
 </body>
 </html>

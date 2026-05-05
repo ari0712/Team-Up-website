@@ -113,8 +113,7 @@
             if (u.max_new_to_qut > 0) rules.push(`Maximum ${u.max_new_to_qut} new-to-QUT students in one team`);
 
             document.getElementById('rulesList').innerHTML = rules.map(r => `<li>✓ ${r}</li>`).join('');
-            document.getElementById('editRulesBtn').onclick = () =>
-                alert('Edit Rule Set — wire this up when you build the edit page.');
+            document.getElementById('editRulesBtn').onclick = () => openEditRules(u);
 
         } catch(e) { console.error('loadUnit:', e); }
     }
@@ -167,6 +166,83 @@
             return `<a class="t-snav-link" href="${href}">${item.label}</a>`;
         }).join('');
     }
+
+    let currentUnit = null;
+
+    function openEditRules(u) {
+        currentUnit = u;
+        document.getElementById('er-sizes').value    = u.valid_team_sizes || '4';
+        document.getElementById('er-newqut').value   = u.max_new_to_qut   || 2;
+        document.getElementById('er-onegroup').checked = !!u.max_one_group;
+        document.getElementById('er-tutorial').checked = !!u.must_share_tutorial;
+        // Convert stored deadline to datetime-local format
+        if (u.deadline) {
+            const d = new Date(u.deadline);
+            const pad = n => String(n).padStart(2, '0');
+            document.getElementById('er-deadline').value =
+                `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        }
+        document.getElementById('er-save-msg').textContent = '';
+        document.getElementById('editRulesModal').classList.add('open');
+    }
+
+    function closeEditRules() {
+        document.getElementById('editRulesModal').classList.remove('open');
+    }
+
+    async function saveRules() {
+        const payload = {
+            validTeamSizes:    document.getElementById('er-sizes').value.trim(),
+            maxNewToQut:       parseInt(document.getElementById('er-newqut').value) || 2,
+            maxOneGroup:       document.getElementById('er-onegroup').checked,
+            mustShareTutorial: document.getElementById('er-tutorial').checked,
+            deadline:          document.getElementById('er-deadline').value
+        };
+        try {
+            await put(`/api/units/${unitId}/rules`, payload);
+            document.getElementById('er-save-msg').textContent = 'Saved!';
+            setTimeout(closeEditRules, 800);
+            await loadUnit();     // refresh the rules display on dashboard
+        } catch(e) {
+            document.getElementById('er-save-msg').style.color = '#e94560';
+            document.getElementById('er-save-msg').textContent = e.message;
+        }
+    }
 </script>
+<!-- Edit Rules Modal -->
+<div class="t-modal-overlay" id="editRulesModal">
+    <div class="t-modal-box">
+        <h3>Edit Rule Set</h3>
+        <div class="t-modal-field">
+            <label>Valid Team Sizes (comma-separated, e.g. 4,5)</label>
+            <input type="text" id="er-sizes" placeholder="e.g. 4,5">
+        </div>
+        <div class="t-modal-field">
+            <label>Max New-to-QUT Students Per Team</label>
+            <input type="text" id="er-newqut" placeholder="e.g. 2">
+        </div>
+        <div class="t-modal-field">
+            <div class="t-modal-toggle">
+                <input type="checkbox" id="er-onegroup">
+                <label for="er-onegroup">Max one group per student</label>
+            </div>
+        </div>
+        <div class="t-modal-field">
+            <div class="t-modal-toggle">
+                <input type="checkbox" id="er-tutorial">
+                <label for="er-tutorial">Students must share tutorial time</label>
+            </div>
+        </div>
+        <div class="t-modal-field">
+            <label>Deadline</label>
+            <input type="datetime-local" id="er-deadline">
+        </div>
+        <p id="er-save-msg" class="t-save-msg"></p>
+        <div class="t-modal-actions">
+            <button class="t-modal-cancel" onclick="closeEditRules()">Cancel</button>
+            <button class="t-modal-save" onclick="saveRules()">Save Changes</button>
+        </div>
+    </div>
+</div>
 </body>
 </html>

@@ -520,3 +520,30 @@ body.t-page {
 /* ── Create form additions ── */
 .t-input-wide { width: 320px; }
 .t-csv-count  { font-size: 13px; color: #22c55e; font-weight: 600; }
+
+.t-modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45); z-index: 200;
+    align-items: center; justify-content: center;
+}
+.t-modal-overlay.open { display: flex; }
+.t-modal-box {
+    background: #fff; border-radius: 16px;
+    padding: 28px 32px; max-width: 480px; width: 92%;
+}
+.t-modal-box h3 { font-size: 18px; font-weight: 800; color: #1a2a4a; margin-bottom: 20px; }
+.t-modal-field { margin-bottom: 16px; }
+.t-modal-field label { display: block; font-size: 13px; font-weight: 700; color: #1a2a4a; margin-bottom: 6px; }
+.t-modal-field input[type="text"],
+.t-modal-field input[type="datetime-local"] {
+    width: 100%; border: 1.5px solid #d0dff0; border-radius: 8px;
+    padding: 9px 12px; font-size: 14px; outline: none; box-sizing: border-box;
+}
+.t-modal-field input:focus { border-color: #2663ff; }
+.t-modal-toggle { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: #1a2a4a; }
+.t-modal-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.t-modal-actions { display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end; }
+.t-modal-save { background: #2663ff; color: #fff; border: none; border-radius: 8px; padding: 11px 28px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.t-modal-save:hover { background: #1a4fcc; }
+.t-modal-cancel { background: none; border: 1.5px solid #d0dff0; border-radius: 8px; padding: 11px 20px; font-size: 14px; font-weight: 700; cursor: pointer; color: #555; }
+.t-save-msg { font-size: 13px; color: #22c55e; font-weight: 600; min-height: 18px; margin-top: 8px; text-align: right; }

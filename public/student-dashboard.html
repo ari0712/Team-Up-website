@@ -82,10 +82,12 @@
         if (!nav) return;
         unitId = nav.unitId;
 
-        const [unit, prog, teamData] = await Promise.all([
-            get(`/api/student/units/${unitId}`),
+        const unit = await requireUnitAccess(unitId);
+        if (!unit) return;
+
+        const [prog, teamData] = await Promise.all([
             get(`/api/student/units/${unitId}/progress`),
-            get(`/api/student/units/${unitId}/my-team`).catch(() => ({ team:null }))
+            get(`/api/student/units/${unitId}/my-team`).catch(() => ({ team: null }))
         ]);
         progress = prog;
 
