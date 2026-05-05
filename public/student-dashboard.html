@@ -15,6 +15,33 @@
         .s-progress-status.in-progress { color:#e94560 }
         .s-progress-status.not-started { color:#888 }
         .s-progress-status.locked { color:#aaa }
+
+        .invite-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .invite-row:last-child { border-bottom: none; }
+        .invite-info { flex: 1; font-size: 14px; color: #1a2a4a; }
+        .invite-info strong { font-weight: 700; }
+        .invite-info span { color: #666; font-size: 13px; }
+        .invite-actions { display: flex; gap: 8px; }
+        .btn-accept {
+            background: #22c55e; color: #fff; border: none;
+            border-radius: 8px; padding: 7px 18px;
+            font-size: 13px; font-weight: 700; cursor: pointer;
+        }
+        .btn-accept:hover { background: #16a34a; }
+        .btn-decline {
+            background: #fff; color: #e94560;
+            border: 1.5px solid #e94560; border-radius: 8px;
+            padding: 7px 18px; font-size: 13px; font-weight: 700; cursor: pointer;
+        }
+        .btn-decline:hover { background: #fff0f3; }
     </style>
 </head>
 <body class="t-page">
@@ -46,6 +73,14 @@
             <p id="team-status-text">Loading…</p>
             <button class="t-open-btn" style="margin-top:14px;width:160px"
                     onclick="goTo('my-team')">View Status</button>
+        </div>
+        <!-- Incoming invites -->
+        <div class="s-card" id="invites-card" style="display:none">
+            <h3 style="font-size:17px;font-weight:800;margin-bottom:14px">
+                📬 Team Invitations
+                <span id="invite-count-badge" style="background:#e94560;color:#fff;font-size:12px;font-weight:700;padding:2px 8px;border-radius:20px;margin-left:8px"></span>
+            </h3>
+            <div id="invites-list"></div>
         </div>
         <!-- Find teammates CTA -->
         <div class="s-card">
@@ -82,12 +117,11 @@
         if (!nav) return;
         unitId = nav.unitId;
 
-        const unit = await requireUnitAccess(unitId);
-        if (!unit) return;
-
-        const [prog, teamData] = await Promise.all([
+        const [unit, prog, teamData] = await Promise.all([
+            requireUnitAccess(unitId),
             get(`/api/student/units/${unitId}/progress`),
-            get(`/api/student/units/${unitId}/my-team`).catch(() => ({ team: null }))
+            get(`/api/student/units/${unitId}/my-team`).catch(() => ({ team: null })),
+            loadInvites()   // ← add this
         ]);
         progress = prog;
 
@@ -138,6 +172,65 @@
 
     function goTo(page) {
         window.location = `/student-${page}.html?unitId=${unitId}`;
+    }
+
+    async function loadInvites() {
+        try {
+            const invites = await get(`/api/student/units/${unitId}/invites`);
+            const card    = document.getElementById('invites-card');
+            const list    = document.getElementById('invites-list');
+
+            if (!invites.length) {
+                card.style.display = 'none';
+                return;
+            }
+
+            card.style.display = 'block';
+            document.getElementById('invite-count-badge').textContent = invites.length;
+
+            list.innerHTML = invites.map(inv => `
+          <div class="invite-row" id="invite-row-${inv.invite_id}">
+            <div class="invite-info">
+              <strong>${inv.from_name || inv.from_student}</strong> invited you to join
+              <strong>${inv.team_name || 'their team'}</strong>
+              <br><span>Sent ${new Date(inv.sent_at).toLocaleString('en-AU', { weekday:'short', hour:'numeric', minute:'2-digit' })}</span>
+            </div>
+            <div class="invite-actions">
+              <button class="btn-accept"  onclick="respondInvite('${inv.invite_id}', 'accept')">Accept</button>
+              <button class="btn-decline" onclick="respondInvite('${inv.invite_id}', 'decline')">Decline</button>
+            </div>
+          </div>
+        `).join('');
+
+        } catch(e) {
+            // Silently fail — invites are a non-critical section
+            console.error('Could not load invites:', e);
+        }
+    }
+
+    async function respondInvite(inviteId, action) {
+        try {
+            await fetch(`/api/student/units/${unitId}/invites/${inviteId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+
+            if (action === 'accept') {
+                // Reload the whole page so team status + progress update
+                window.location.reload();
+            } else {
+                // Just remove the row for decline
+                const row = document.getElementById(`invite-row-${inviteId}`);
+                if (row) row.remove();
+                // Hide card if no more invites
+                const remaining = document.querySelectorAll('[id^="invite-row-"]');
+                if (!remaining.length) document.getElementById('invites-card').style.display = 'none';
+            }
+
+        } catch(e) {
+            alert('Could not respond to invite: ' + e.message);
+        }
     }
 </script>
 </body>
