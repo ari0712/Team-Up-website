@@ -39,11 +39,11 @@
 <script>
   const params = new URLSearchParams(location.search);
   const role = params.get('role') || 'STUDENT';
+  document.getElementById('portalLabel').textContent = role === 'STUDENT' ? 'Student Portal' : 'Teacher Portal';
   if (role === 'STUDENT') {
-    document.getElementById('usernameLabel').textContent = 'Student ID';
+    document.querySelector('.field-group label').textContent = 'Student ID';
     document.getElementById('username').placeholder = 'e.g. n12345678';
   }
-  document.getElementById('portalLabel').textContent = role === 'STUDENT' ? 'Student Portal' : 'Teacher Portal';
 
   document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 

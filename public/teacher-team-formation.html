@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeamUp – Team Formation</title>
+    <link rel="stylesheet" href="style1.css">
+    <link rel="stylesheet" href="teacher-style.css">
+    <style>
+        .tf-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .tf-team-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 22px 24px;
+            border: 1.5px solid #d0dff0;
+        }
+        .tf-team-id {
+            font-size: 18px;
+            font-weight: 800;
+            color: #1a2a4a;
+            margin-bottom: 14px;
+        }
+        .tf-val-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #1a2a4a;
+            margin-bottom: 8px;
+        }
+        .tf-dot {
+            width: 13px;
+            height: 13px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .tf-dot-green { background: #22c55e; }
+        .tf-dot-red   { background: #e94560; }
+        .tf-view-btn {
+            display: block;
+            width: 100%;
+            margin-top: 16px;
+            background: #2663ff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .tf-view-btn:hover { background: #1a4fcc; }
+        .tf-status-badge {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 20px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        .tf-status-forming    { background: #fff3cd; color: #856404; }
+        .tf-status-submitted  { background: #cfe2ff; color: #0c447c; }
+        .tf-status-approved   { background: #d1e7dd; color: #0a3622; }
+        .tf-status-rejected   { background: #f8d7da; color: #58151c; }
+        .tf-pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+            padding: 20px 0 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #1a2a4a;
+        }
+        .tf-pagination button {
+            background: none;
+            border: none;
+            font-size: 14px;
+            font-weight: 700;
+            color: #2663ff;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+        .tf-pagination button:disabled { color: #aaa; cursor: default; }
+        .tf-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+        .tf-modal-overlay.open { display: flex; }
+        .tf-modal {
+            background: #fff;
+            border-radius: 16px;
+            padding: 28px 32px;
+            max-width: 520px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .tf-modal h3 { font-size: 18px; font-weight: 800; margin-bottom: 6px; color: #1a2a4a; }
+        .tf-modal-close {
+            float: right;
+            background: none;
+            border: none;
+            font-size: 22px;
+            cursor: pointer;
+            color: #888;
+            margin-top: -4px;
+        }
+        .tf-member-row {
+            display: flex;
+            gap: 10px;
+            padding: 7px 0;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 14px;
+        }
+        .tf-member-row:last-child { border-bottom: none; }
+        .tf-approve-btn {
+            background: #22c55e;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 16px;
+            margin-right: 10px;
+        }
+        .tf-reject-btn {
+            background: #e94560;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 16px;
+        }
+    </style>
+</head>
+<body class="t-page">
+
+<header class="t-header">
+    <button class="t-logout-btn" onclick="doLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1>Teacher Team Formation</h1>
+        <p>Welcome, <span id="teacherName"></span>!</p>
+    </div>
+    <a class="logo" href="#">
+        <img class="logo-icon" src="teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span>
+    </a>
+</header>
+
+<div class="t-dashboard-layout">
+    <nav class="t-sidebar-nav" id="teacher-sidebar"></nav>
+
+    <main class="t-dash-content">
+        <div id="teams-grid" class="tf-grid">
+            <p class="t-empty">Loading teams…</p>
+        </div>
+        <div class="tf-pagination">
+            <button id="prevBtn" onclick="changePage(-1)" disabled>← Prev Page</button>
+            <span id="pageLabel">Page 1</span>
+            <button id="nextBtn" onclick="changePage(1)">Next Page →</button>
+        </div>
+    </main>
+
+    <div class="t-vert-divider"></div>
+
+    <aside class="t-progress-aside">
+        <h2 class="t-progress-heading">Summary</h2>
+        <div id="summary-rows" class="t-progress-rows"></div>
+    </aside>
+</div>
+
+<!-- Team detail modal -->
+<div class="tf-modal-overlay" id="teamModal">
+    <div class="tf-modal">
+        <button class="tf-modal-close" onclick="closeModal()">✕</button>
+        <div id="modal-body"></div>
+    </div>
+</div>
+
+<footer class="t-footer">High Fidelity Design Concept.</footer>
+
+<script src="api.js"></script>
+<script>
+    const params = new URLSearchParams(location.search);
+    const unitId = params.get('unitId');
+    const PAGE_SIZE = 4;
+    let allTeams = [], currentPage = 1;
+
+    (async () => {
+        const user = await requireSession('TEACHER');
+        if (!user) return;
+        document.getElementById('teacherName').textContent = user.username;
+        if (!unitId) { window.location = '/teacher-home.html'; return; }
+        buildTeacherSidebar('team-formation');
+        await loadTeams();
+    })();
+
+    async function loadTeams() {
+        try {
+            allTeams = await get(`/api/units/${unitId}/all-teams`);
+            if (!allTeams.length) {
+                document.getElementById('teams-grid').innerHTML =
+                    '<p class="t-empty">No teams currently forming.</p>';
+                updatePagination();
+                renderSummary();
+                return;
+            }
+            renderPage();
+            renderSummary();
+        } catch(e) {
+            document.getElementById('teams-grid').innerHTML =
+                `<p class="t-empty">Error: ${e.message}</p>`;
+        }
+    }
+
+    function renderPage() {
+        const start = (currentPage - 1) * PAGE_SIZE;
+        const page  = allTeams.slice(start, start + PAGE_SIZE);
+        const grid  = document.getElementById('teams-grid');
+
+        grid.innerHTML = page.map(team => {
+            const v = team.validation;
+            const statusClass = `tf-status-${team.status.toLowerCase()}`;
+            return `
+            <div class="tf-team-card">
+                <div class="tf-team-id">
+                    ${team.team_name || team.team_id.slice(0,8)}
+                    <span class="tf-status-badge ${statusClass}">${team.status}</span>
+                </div>
+                <div class="tf-val-row">
+                    <div class="tf-dot ${v.sizeValid ? 'tf-dot-green' : 'tf-dot-red'}"></div>
+                    Team has ${team.members.length} student${team.members.length !== 1 ? 's' : ''}
+                </div>
+                <div class="tf-val-row">
+                    <div class="tf-dot ${v.tutorialShared ? 'tf-dot-green' : 'tf-dot-red'}"></div>
+                    ${v.tutorialShared
+                ? `Members share ${v.sharedTutorials[0]}`
+                : 'No shared tutorial slot'}
+                </div>
+                <div class="tf-val-row">
+                    <div class="tf-dot ${v.newToQutOk ? 'tf-dot-green' : 'tf-dot-red'}"></div>
+                    New-to-QUT students: ${v.newToQutCount} / ${v.maxNewToQut}
+                </div>
+                <div class="tf-val-row">
+                    <div class="tf-dot ${v.allAccepted ? 'tf-dot-green' : 'tf-dot-red'}"></div>
+                    ${v.allAccepted ? 'All members accepted' : 'Waiting for invited member to accept'}
+                </div>
+                <button class="tf-view-btn" onclick="viewTeam('${team.team_id}')">View Team</button>
+            </div>`;
+        }).join('');
+
+        updatePagination();
+    }
+
+    function updatePagination() {
+        const totalPages = Math.max(1, Math.ceil(allTeams.length / PAGE_SIZE));
+        document.getElementById('pageLabel').textContent = `Page ${currentPage} of ${totalPages}`;
+        document.getElementById('prevBtn').disabled = currentPage <= 1;
+        document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+    }
+
+    function changePage(dir) {
+        currentPage += dir;
+        renderPage();
+    }
+
+    function renderSummary() {
+        const total     = allTeams.length;
+        const submitted = allTeams.filter(t => t.status === 'SUBMITTED').length;
+        const approved  = allTeams.filter(t => t.status === 'APPROVED').length;
+        const forming   = allTeams.filter(t => t.status === 'FORMING').length;
+        document.getElementById('summary-rows').innerHTML = `
+            <div class="t-progress-row">
+                <div class="t-dot t-dot-green"></div>
+                <span class="t-progress-label">Total teams</span>
+                <span class="t-progress-stat green">${total}</span>
+            </div>
+            <div class="t-progress-row">
+                <div class="t-dot" style="background:#f5a623"></div>
+                <span class="t-progress-label">Forming</span>
+                <span class="t-progress-stat" style="color:#f5a623">${forming}</span>
+            </div>
+            <div class="t-progress-row">
+                <div class="t-dot" style="background:#2663ff"></div>
+                <span class="t-progress-label">Submitted</span>
+                <span class="t-progress-stat" style="color:#2663ff">${submitted}</span>
+            </div>
+            <div class="t-progress-row">
+                <div class="t-dot t-dot-green"></div>
+                <span class="t-progress-label">Approved</span>
+                <span class="t-progress-stat green">${approved}</span>
+            </div>`;
+    }
+
+    function viewTeam(teamId) {
+        const team = allTeams.find(t => t.team_id === teamId);
+        if (!team) return;
+        const v = team.validation;
+        const isSubmitted = team.status === 'SUBMITTED';
+        document.getElementById('modal-body').innerHTML = `
+            <h3>${team.team_name || 'Team'} <span class="tf-status-badge tf-status-${team.status.toLowerCase()}">${team.status}</span></h3>
+            <p style="font-size:13px;color:#888;margin-bottom:14px">ID: ${team.team_id}</p>
+            <div style="background:#7ec8e3;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:700;color:#fff;display:inline-block;margin-bottom:12px">Members</div>
+            ${team.members.map((m, i) => `
+                <div class="tf-member-row">
+                    <span style="min-width:18px;color:#888">${i+1}.</span>
+                    <span style="flex:1;font-weight:600">${m.name || m.student_id}</span>
+                    <span style="color:#555;min-width:120px">${m.role || '—'}</span>
+                    <span style="font-weight:700;color:${m.status==='ACCEPTED'?'#22c55e':'#e94560'}">${m.status}</span>
+                </div>`).join('')}
+            <div style="margin-top:16px;font-size:13px;color:#555">
+                <strong>Shared tutorial:</strong> ${v.sharedTutorials[0] || 'None'}
+            </div>
+            ${isSubmitted ? `
+                <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+                    <button class="tf-approve-btn" onclick="reviewTeam('${teamId}','approve')">Approve Team</button>
+                    <button class="tf-reject-btn"  onclick="reviewTeam('${teamId}','reject')">Reject Team</button>
+                </div>` : ''}
+        `;
+        document.getElementById('teamModal').classList.add('open');
+    }
+
+    function closeModal() {
+        document.getElementById('teamModal').classList.remove('open');
+    }
+
+    async function reviewTeam(teamId, action) {
+        if (!confirm(`Are you sure you want to ${action} this team?`)) return;
+        try {
+            await put(`/api/units/${unitId}/team-requests/${teamId}`, { action });
+            closeModal();
+            await loadTeams();
+        } catch(e) { alert(e.message); }
+    }
+
+    function buildTeacherSidebar(active) {
+        const nav = document.getElementById('teacher-sidebar');
+        const items = [
+            { key: 'home',           label: 'Home',           href: '/teacher-home.html',             noUnit: true },
+            { key: 'dashboard',      label: 'Dashboard',      href: '/teacher-dashboard.html' },
+            { key: 'team-formation', label: 'Team Formation', href: '/teacher-team-formation.html' },
+            { key: 'class-list',     label: 'Class List',     href: '/teacher-class-list.html' },
+            { key: 'announcements',  label: 'Announcements',  href: '/teacher-announcements.html' },
+        ];
+        nav.innerHTML = items.map(item => {
+            const href = item.noUnit ? item.href : (unitId ? `${item.href}?unitId=${unitId}` : '#');
+            if (item.key === active)
+                return `<button class="t-snav-active">${item.label}</button>`;
+            return `<a class="t-snav-link" href="${href}">${item.label}</a>`;
+        }).join('');
+    }
+
+    async function doLogout() {
+        await post('/api/auth/logout', {});
+        window.location = '/';
+    }
+</script>
+</body>
+</html>

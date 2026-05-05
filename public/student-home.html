@@ -1,84 +1,59 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Home – TeamUp</title>
-    <link rel="stylesheet" href="style1.css" />
-    <link rel="stylesheet" href="teacher-style.css" />
+    <link rel="stylesheet" href="style1.css">
+    <link rel="stylesheet" href="teacher-style.css">
 </head>
-<body>
-<!-- Header -->
+<body class="t-page">
 <header class="t-header">
-    <button class="t-logout-btn" onclick="logout()">Log Out</button>
+    <button class="t-logout-btn" onclick="studentLogout()">Log Out</button>
     <div class="t-header-title">
-        <h1>Student Home</h1>
-        <p id="welcome-msg">Welcome!</p>
+        <h1 id="page-title">Student Home</h1>
+        <p>Welcome, <span id="welcome-name"></span>!</p>
     </div>
-    <div class="t-logo">
-        <img src="teamup-icon.png" alt="TeamUp" class="t-logo-icon" />
-        <span class="t-logo-text"><span class="t-logo-team">Team</span><span class="t-logo-up">Up</span></span>
-    </div>
+    <a class="logo" href="#">
+        <img class="logo-icon" src="teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span>
+    </a>
 </header>
 
-<div class="t-divider"></div>
-
-<!-- Unit card grid -->
-<main class="t-unit-grid" id="unit-grid">
-    <p id="loading-msg" style="padding:2rem;color:#555;">Loading your units…</p>
+<main class="t-main">
+    <div id="unitGrid" class="t-unit-grid">
+        <p class="t-empty">Loading your units…</p>
+    </div>
 </main>
 
-<footer style="text-align:center;padding:1rem;font-size:.75rem;color:#999;">High Fidelity Design Concept.</footer>
+<footer class="t-footer">High Fidelity Design Concept.</footer>
 
+<script src="api.js"></script>
+<script src="student-nav.js"></script>
 <script>
-    // Check auth
-    fetch('/api/auth/me')
-        .then(r => r.json())
-        .then(user => {
-            if (!user || user.role !== 'STUDENT') {
-                window.location = '/';
+    (async () => {
+        const nav = await initStudentNav({ activeItem: 'home', pageTitle: 'Student Home' });
+        if (!nav) return;
+        const grid = document.getElementById('unitGrid');
+        try {
+            const units = await get('/api/student/units');
+            if (!units.length) {
+                grid.innerHTML = '<p class="t-empty">You are not enrolled in any units yet.</p>';
                 return;
             }
-            document.getElementById('welcome-msg').textContent =
-                'Welcome, ' + (user.displayName || user.username) + '!';
-            loadUnits();
-        })
-        .catch(() => window.location = '/');
-
-    function loadUnits() {
-        fetch('/api/units/student/enrolled')
-            .then(r => r.json())
-            .then(units => {
-                const grid = document.getElementById('unit-grid');
-                grid.innerHTML = '';
-                if (!units.length) {
-                    grid.innerHTML = '<p style="padding:2rem;color:#555;">You are not enrolled in any units yet.</p>';
-                    return;
-                }
-                units.forEach(u => {
-                    const card = document.createElement('div');
-                    card.className = 't-unit-card';
-                    card.innerHTML = `
-              <div class="t-unit-card-body">
-                <div class="t-unit-name">${u.unit_name}</div>
-                <div class="t-unit-desc">${u.description || ''}</div>
-                <div class="t-unit-sem">${u.semester || ''}</div>
-              </div>
-              <button class="t-open-btn" onclick="alert('Coming soon!')">Open</button>
-            `;
-                    grid.appendChild(card);
-                });
-            })
-            .catch(() => {
-                document.getElementById('unit-grid').innerHTML =
-                    '<p style="padding:2rem;color:#c00;">Failed to load units.</p>';
-            });
-    }
-
-    function logout() {
-        fetch('/api/auth/logout', { method: 'POST' })
-            .then(() => window.location = '/');
-    }
+            grid.innerHTML = units.map(u => `
+        <div class="t-unit-card">
+          <div class="t-unit-body">
+            <h3 class="t-unit-name">${u.unit_name}</h3>
+            <p class="t-unit-desc">${u.description || ''}</p>
+            <p class="t-unit-sem">${u.semester || ''}</p>
+          </div>
+          <button class="t-open-btn" onclick="window.location='/student-dashboard.html?unitId=${u.unit_id}'">Open</button>
+        </div>
+      `).join('');
+        } catch(e) {
+            grid.innerHTML = `<p class="t-empty">Error: ${e.message}</p>`;
+        }
+    })();
 </script>
 </body>
 </html>
