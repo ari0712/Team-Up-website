@@ -87,7 +87,7 @@
         username, email, password, confirmPassword, role,
         studentId: role === 'STUDENT' ? studentId : ''
       });
-      window.location = user.role === 'STUDENT' ? '/onboarding.html' : '/teacher-home.html';
+      window.location = user.role === 'STUDENT' ? '/student-home.html' : '/teacher-home.html';
     } catch(e) {
       errEl.textContent = e.message;
     }
