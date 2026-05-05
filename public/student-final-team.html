@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Team – TeamUp</title>
+    <link rel="stylesheet" href="style1.css">
+    <link rel="stylesheet" href="teacher-style.css">
+    <style>
+        .s-card { background:#fff;border-radius:14px;padding:22px 24px;border:1.5px solid #d0dff0;margin-bottom:16px }
+        .s-member-row { display:flex;gap:12px;padding:7px 0;border-bottom:1px solid #f0f0f0;font-size:14px }
+        .s-member-row:last-child { border-bottom:none }
+        .s-validation { background:#7ec8e3;border-radius:12px;padding:18px 20px }
+        .s-val-row { display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;font-weight:600;color:#fff }
+        .s-val-dot { width:11px;height:11px;border-radius:50%;flex-shrink:0 }
+    </style>
+</head>
+<body class="t-page">
+<header class="t-header">
+    <button class="t-logout-btn" onclick="studentLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">Final Team</h1>
+        <p>Welcome, <span id="welcome-name"></span>!</p>
+    </div>
+    <a class="logo" href="#"><img class="logo-icon" src="teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span></a>
+</header>
+<div class="t-divider"></div>
+<div style="display:flex">
+    <nav class="t-sidebar-nav" id="student-sidebar"></nav>
+    <div style="flex:1;padding:28px 32px;overflow-y:auto;max-width:760px">
+        <div id="final-content"><p style="color:#888">Loading…</p></div>
+    </div>
+</div>
+<footer class="t-footer">High Fidelity Design Concept.</footer>
+<script src="api.js"></script>
+<script src="student-nav.js"></script>
+<script>
+    (async () => {
+        const nav = await initStudentNav({ activeItem:'final-team', pageTitle:'Final Team' });
+        if (!nav) return;
+        const { unitId } = nav;
+        const [progress, teamData] = await Promise.all([
+            get(`/api/student/units/${unitId}/progress`),
+            get(`/api/student/units/${unitId}/my-team`)
+        ]);
+        const el = document.getElementById('final-content');
+        if (!progress.teacher_approved || !teamData.team || teamData.team.status !== 'APPROVED') {
+            el.innerHTML = '<p style="color:#aaa;font-size:15px">Your final team is not yet confirmed. This page will unlock once your teacher approves your team.</p>';
+            return;
+        }
+        const { team, members, validation } = teamData;
+        el.innerHTML = `
+      <div class="s-card">
+        <h3 style="font-size:19px;font-weight:800;margin-bottom:4px">Team Request Status</h3>
+        <p style="font-size:14px;font-weight:700;color:#22c55e;margin-bottom:8px">Final Team Confirmed</p>
+        <p style="font-size:14px;margin-bottom:16px">Congratulations, your team has been confirmed.</p>
+        <p style="font-size:14px;margin-bottom:4px"><strong>Team Name:</strong> ${team.team_name}</p>
+        ${validation.sharedTutorials.length ? `<p style="font-size:14px;margin-bottom:12px"><strong>Shared Tutorial:</strong> ${validation.sharedTutorials[0]}</p>` : ''}
+        <div style="background:#7ec8e3;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:700;color:#fff;display:inline-block;margin-bottom:12px">Confirmed Members</div>
+        ${members.map((m,i) => `
+          <div class="s-member-row">
+            <span style="min-width:20px;color:#888">${i+1}.</span>
+            <span style="flex:1;font-weight:600">${m.name||m.student_id}</span>
+            <span style="color:#555">${m.role||'—'}</span>
+          </div>`).join('')}
+      </div>
+      <div class="s-validation">
+        <h4 style="font-size:14px;font-weight:700;color:#fff;margin-bottom:8px">Team Validation :</h4>
+        <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:10px">Team Quality Score: ${team.quality_score || 88}%</div>
+        <div class="s-val-row"><div class="s-val-dot" style="background:#22c55e"></div> Team has ${members.length} students</div>
+        <div class="s-val-row"><div class="s-val-dot" style="background:#22c55e"></div> ${validation.sharedTutorials[0] ? `Members share ${validation.sharedTutorials[0]}` : 'Tutorial shared'}</div>
+        <div class="s-val-row"><div class="s-val-dot" style="background:#22c55e"></div> New-to-QUT students: ${validation.newToQutCount} / ${validation.maxNewToQut}</div>
+        <div class="s-val-row"><div class="s-val-dot" style="background:#22c55e"></div> All members accepted</div>
+      </div>`;
+    })();
+</script>
+</body>
+</html>

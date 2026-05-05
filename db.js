@@ -100,6 +100,68 @@ async function initDb() {
   PRIMARY KEY (unit_id, student_id)
 )`);
 
+  // ── STUDENT PORTAL: per-unit preferences ──────────────────────
+  db.run(`CREATE TABLE IF NOT EXISTS student_unit_prefs (
+    unit_id             TEXT NOT NULL,
+    student_id          TEXT NOT NULL,
+    tutorial_slots      TEXT DEFAULT '',
+    project_interests   TEXT DEFAULT '',
+    skills              TEXT DEFAULT '',
+    preferred_role      TEXT DEFAULT '',
+    preferred_teammates TEXT DEFAULT 'None',
+    saved_at            TEXT DEFAULT '',
+    PRIMARY KEY (unit_id, student_id),
+    FOREIGN KEY (unit_id) REFERENCES units(unit_id)
+  )`);
+
+  // ── STUDENT PORTAL: unit-scoped teams ─────────────────────────
+  db.run(`CREATE TABLE IF NOT EXISTS unit_teams (
+    team_id      TEXT PRIMARY KEY,
+    unit_id      TEXT NOT NULL,
+    team_name    TEXT DEFAULT '',
+    created_by   TEXT NOT NULL,
+    status       TEXT DEFAULT 'FORMING',
+    submitted_at TEXT DEFAULT '',
+    quality_score INTEGER DEFAULT 0,
+    FOREIGN KEY (unit_id) REFERENCES units(unit_id)
+  )`);
+
+  // ── STUDENT PORTAL: team membership ───────────────────────────
+  db.run(`CREATE TABLE IF NOT EXISTS unit_team_members (
+    team_id    TEXT NOT NULL,
+    student_id TEXT NOT NULL,
+    role       TEXT DEFAULT '',
+    status     TEXT DEFAULT 'ACCEPTED',
+    PRIMARY KEY (team_id, student_id),
+    FOREIGN KEY (team_id) REFERENCES unit_teams(team_id)
+  )`);
+
+  // ── STUDENT PORTAL: team invites ──────────────────────────────
+  db.run(`CREATE TABLE IF NOT EXISTS unit_team_invites (
+    invite_id    TEXT PRIMARY KEY,
+    unit_id      TEXT NOT NULL,
+    team_id      TEXT NOT NULL,
+    from_student TEXT NOT NULL,
+    to_student   TEXT NOT NULL,
+    status       TEXT DEFAULT 'PENDING',
+    sent_at      TEXT DEFAULT '',
+    FOREIGN KEY (unit_id) REFERENCES units(unit_id),
+    FOREIGN KEY (team_id) REFERENCES unit_teams(team_id)
+  )`);
+
+  // ── Add teacher_approved stage to existing student_progress ───
+  try { db.run(`ALTER TABLE student_progress ADD COLUMN teacher_approved INTEGER DEFAULT 0`); } catch(e) {}
+
+  // ── Announcements per unit ─────────────────────────────────────
+  db.run(`CREATE TABLE IF NOT EXISTS unit_announcements (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    unit_id    TEXT NOT NULL,
+    title      TEXT NOT NULL DEFAULT '',
+    content    TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (unit_id) REFERENCES units(unit_id)
+  )`);
+
   save();
   return db;
 }

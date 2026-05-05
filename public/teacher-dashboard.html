@@ -25,13 +25,7 @@
 <div class="t-dashboard-layout">
 
     <!-- Left sidebar -->
-    <nav class="t-sidebar-nav">
-        <a class="t-snav-link" href="/teacher-home.html">Home</a>
-        <button class="t-snav-active">Dashboard</button>
-        <span class="t-snav-link t-snav-disabled">Team Formation</span>
-        <span class="t-snav-link t-snav-disabled">Class List</span>
-        <span class="t-snav-link t-snav-disabled">Announcements</span>
-    </nav>
+    <nav class="t-sidebar-nav" id="teacher-sidebar"></nav>
 
     <!-- Middle content -->
     <main class="t-dash-content">
@@ -82,6 +76,7 @@
         const user = await requireSession('TEACHER');
         if (!user) return;
         document.getElementById('teacherName').textContent = user.username;
+        buildTeacherSidebar('dashboard');
         if (!unitId) { window.location = '/teacher-home.html'; return; }
         await Promise.all([loadUnit(), loadProgress()]);
     })();
@@ -153,6 +148,24 @@
     async function doLogout() {
         await post('/api/auth/logout', {});
         window.location = '/';
+    }
+
+    function buildTeacherSidebar(active) {
+        const nav = document.getElementById('teacher-sidebar');
+        const items = [
+            { key: 'home',            label: 'Home',           href: '/teacher-home.html',              noUnit: true },
+            { key: 'dashboard',       label: 'Dashboard',      href: '/teacher-dashboard.html' },
+            { key: 'team-formation',  label: 'Team Formation', href: '/teacher-team-formation.html' },
+            { key: 'class-list',      label: 'Class List',     href: '/teacher-class-list.html' },
+            { key: 'announcements',   label: 'Announcements',  href: '/teacher-announcements.html' },
+        ];
+        nav.innerHTML = items.map(item => {
+            const href = item.noUnit ? item.href : (unitId ? `${item.href}?unitId=${unitId}` : '#');
+            if (item.key === active) {
+                return `<button class="t-snav-active">${item.label}</button>`;
+            }
+            return `<a class="t-snav-link" href="${href}">${item.label}</a>`;
+        }).join('');
     }
 </script>
 </body>

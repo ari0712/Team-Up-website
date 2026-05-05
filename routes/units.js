@@ -146,5 +146,170 @@ router.put('/:unitId/progress/:studentId', requireTeacher, (req, res) => {
     res.json({ ok: true });
 });
 
+// ── GET /api/units/:unitId/team-requests ──────────────────────
+router.get('/:unitId/team-requests', requireTeacher, (req, res) => {
+    const unit = get('SELECT * FROM units WHERE unit_id = ? AND created_by = ?',
+        [req.params.unitId, req.session.user.username]);
+    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+    const teams = all(
+        `SELECT t.*, COUNT(tm.student_id) as member_count
+         FROM unit_teams t
+         LEFT JOIN unit_team_members tm ON tm.team_id = t.team_id
+         WHERE t.unit_id = ? AND t.status IN ('SUBMITTED','APPROVED','REJECTED')
+         GROUP BY t.team_id
+         ORDER BY t.submitted_at DESC`,
+        [req.params.unitId]
+    );
+    const result = teams.map(team => {
+        const members = all(
+            `SELECT tm.student_id, tm.role, tm.status, us.name
+             FROM unit_team_members tm
+             INNER JOIN unit_students us ON us.unit_id = ? AND us.student_id = tm.student_id
+             WHERE tm.team_id = ?`,
+            [req.params.unitId, team.team_id]
+        );
+        return { ...team, members };
+    });
+    res.json(result);
+});
+
+// ── PUT /api/units/:unitId/team-requests/:teamId ──────────────
+// Body: { action: 'approve' | 'reject' }
+router.put('/:unitId/team-requests/:teamId', requireTeacher, (req, res) => {
+    const { action } = req.body;
+    if (!['approve','reject'].includes(action))
+        return res.status(400).json({ error: 'action must be approve or reject' });
+
+    const unit = get('SELECT * FROM units WHERE unit_id = ? AND created_by = ?',
+        [req.params.unitId, req.session.user.username]);
+    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+    const newStatus = action === 'approve' ? 'APPROVED' : 'REJECTED';
+    run(`UPDATE unit_teams SET status = ? WHERE team_id = ?`,
+        [newStatus, req.params.teamId]);
+
+    if (action === 'approve') {
+        const members = all(`SELECT student_id FROM unit_team_members WHERE team_id = ?`,
+            [req.params.teamId]);
+        members.forEach(m => {
+            run(`UPDATE student_progress SET teacher_approved = 1 WHERE unit_id = ? AND student_id = ?`,
+                [req.params.unitId, m.student_id]);
+        });
+    }
+    res.json({ ok: true });
+});
+
+// ── GET /api/units/:unitId/all-teams ──────────────────────────
+// Returns all teams in the unit with members + validation result
+router.get('/:unitId/all-teams', requireTeacher, (req, res) => {
+    const unit = get('SELECT * FROM units WHERE unit_id = ? AND created_by = ?',
+        [req.params.unitId, req.session.user.username]);
+    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+    const teams = all(
+        `SELECT t.*, COUNT(tm.student_id) as member_count
+         FROM unit_teams t
+         LEFT JOIN unit_team_members tm ON tm.team_id = t.team_id
+         WHERE t.unit_id = ?
+         GROUP BY t.team_id
+         ORDER BY t.rowid DESC`,
+        [req.params.unitId]
+    );
+
+    const validSizes = (unit.valid_team_sizes || '4').split(',').map(s => parseInt(s.trim()));
+
+    const result = teams.map(team => {
+        const members = all(
+            `SELECT tm.student_id, tm.role, tm.status, us.name, us.is_new_to_qut,
+                    sup.tutorial_slots
+             FROM unit_team_members tm
+             INNER JOIN unit_students us ON us.unit_id = ? AND us.student_id = tm.student_id
+             LEFT JOIN student_unit_prefs sup ON sup.unit_id = ? AND sup.student_id = tm.student_id
+             WHERE tm.team_id = ?`,
+            [req.params.unitId, req.params.unitId, team.team_id]
+        );
+
+        const acceptedMembers = members.filter(m => m.status === 'ACCEPTED');
+        const slotSets = acceptedMembers.map(m =>
+            new Set((m.tutorial_slots || '').split(',').map(s => s.trim()).filter(Boolean))
+        );
+        const sharedTutorials = slotSets.length > 0
+            ? [...slotSets[0]].filter(slot => slotSets.every(s => s.has(slot)))
+            : [];
+
+        const newToQutCount = members.filter(m => m.is_new_to_qut == 1).length;
+
+        const validation = {
+            sizeValid:       validSizes.includes(members.length),
+            tutorialShared:  sharedTutorials.length > 0,
+            sharedTutorials,
+            newToQutOk:      newToQutCount <= (unit.max_new_to_qut || 2),
+            allAccepted:     members.every(m => m.status === 'ACCEPTED'),
+            newToQutCount,
+            maxNewToQut:     unit.max_new_to_qut || 2
+        };
+
+        return { ...team, members, validation };
+    });
+
+    res.json(result);
+});
+
+// ── GET /api/units/:unitId/class-list ─────────────────────────
+// All students in the unit with their individual progress stages
+router.get('/:unitId/class-list', requireTeacher, (req, res) => {
+    const unit = get('SELECT * FROM units WHERE unit_id = ? AND created_by = ?',
+        [req.params.unitId, req.session.user.username]);
+    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+    const students = all(
+        `SELECT us.student_id, us.name, us.tutorial_time, us.is_new_to_qut,
+                us.degree, us.major,
+                COALESCE(sp.read_rules,          0) AS read_rules,
+                COALESCE(sp.entered_preferences, 0) AS entered_preferences,
+                COALESCE(sp.in_team,             0) AS in_team,
+                COALESCE(sp.submitted_request,   0) AS submitted_request,
+                COALESCE(sp.teacher_approved,    0) AS teacher_approved,
+                sup.tutorial_slots, sup.project_interests, sup.skills, sup.preferred_role
+         FROM unit_students us
+         LEFT JOIN student_progress sp ON sp.unit_id = us.unit_id AND sp.student_id = us.student_id
+         LEFT JOIN student_unit_prefs sup ON sup.unit_id = us.unit_id AND sup.student_id = us.student_id
+         WHERE us.unit_id = ?
+         ORDER BY us.name ASC`,
+        [req.params.unitId]
+    );
+
+    res.json(students);
+});
+
+// ── GET /api/units/:unitId/announcements ──────────────────────
+router.get('/:unitId/announcements', requireTeacher, (req, res) => {
+    const unit = get('SELECT * FROM units WHERE unit_id = ? AND created_by = ?',
+        [req.params.unitId, req.session.user.username]);
+    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+    const announcements = all(
+        `SELECT * FROM unit_announcements WHERE unit_id = ? ORDER BY id DESC`,
+        [req.params.unitId]
+    );
+    res.json(announcements);
+});
+
+// ── POST /api/units/:unitId/announcements ─────────────────────
+router.post('/:unitId/announcements', requireTeacher, (req, res) => {
+    const unit = get('SELECT * FROM units WHERE unit_id = ? AND created_by = ?',
+        [req.params.unitId, req.session.user.username]);
+    if (!unit) return res.status(404).json({ error: 'Unit not found' });
+
+    const { title, content } = req.body;
+    if (!title || !title.trim()) return res.status(400).json({ error: 'Title is required' });
+
+    run(
+        `INSERT INTO unit_announcements (unit_id, title, content, created_at) VALUES (?,?,?,?)`,
+        [req.params.unitId, title.trim(), (content || '').trim(), new Date().toISOString()]
+    );
+    res.json({ ok: true });
+});
 
 module.exports = router;

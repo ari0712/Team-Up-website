@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Dashboard – TeamUp</title>
+    <link rel="stylesheet" href="style1.css">
+    <link rel="stylesheet" href="teacher-style.css">
+    <style>
+        .s-card { background:#fff;border-radius:14px;padding:22px 24px;border:1.5px solid #d0dff0;margin-bottom:16px }
+        .s-card h3 { font-size:17px;font-weight:800;margin-bottom:6px }
+        .s-card p  { font-size:14px;color:#555 }
+        .s-dot-gray { background:#ccc !important }
+        .s-progress-status { font-size:13px;font-weight:700 }
+        .s-progress-status.completed { color:#22c55e }
+        .s-progress-status.in-progress { color:#e94560 }
+        .s-progress-status.not-started { color:#888 }
+        .s-progress-status.locked { color:#aaa }
+    </style>
+</head>
+<body class="t-page">
+<header class="t-header">
+    <button class="t-logout-btn" onclick="studentLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">Student Dashboard</h1>
+        <p>Welcome, <span id="welcome-name"></span>!</p>
+    </div>
+    <a class="logo" href="#"><img class="logo-icon" src="teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span></a>
+</header>
+<div class="t-divider"></div>
+<div class="t-dashboard-layout">
+    <nav class="t-sidebar-nav" id="student-sidebar"></nav>
+    <div class="t-dash-content">
+        <!-- Deadline banner -->
+        <div class="t-deadline-banner" id="deadline-banner">
+            <div>
+                <div style="font-size:30px;font-weight:900;color:#fff">Deadline</div>
+                <div id="deadline-date" style="font-size:15px;font-weight:700;color:#fff;margin-top:4px"></div>
+                <div id="deadline-remaining" style="font-size:14px;color:#fff;opacity:.9;margin-top:2px"></div>
+            </div>
+            <div class="t-warning-circle">!</div>
+        </div>
+        <!-- Team Status card -->
+        <div class="s-card" id="team-status-card">
+            <h3>Team Status</h3>
+            <p id="team-status-text">Loading…</p>
+            <button class="t-open-btn" style="margin-top:14px;width:160px"
+                    onclick="goTo('my-team')">View Status</button>
+        </div>
+        <!-- Find teammates CTA -->
+        <div class="s-card">
+            <h3>Need help finding a team?</h3>
+            <p>You can search manually or let TeamUp suggest teammates.</p>
+            <div style="display:flex;gap:12px;margin-top:14px">
+                <button class="t-open-btn" style="width:180px" onclick="goTo('find-teammates')">Find Teammates</button>
+                <button class="t-open-btn" style="width:180px;background:#1a2a4a" onclick="alert('Auto-match coming soon!')">Auto-Match Me</button>
+            </div>
+        </div>
+    </div>
+    <div class="t-vert-divider"></div>
+    <aside class="t-progress-aside">
+        <h2 class="t-progress-heading">Team Formation Progress</h2>
+        <div class="t-progress-rows" id="progress-rows"></div>
+        <button class="t-view-progress-btn" id="continue-btn" onclick="continueSetup()">Continue Setup</button>
+    </aside>
+</div>
+<footer class="t-footer">High Fidelity Design Concept.</footer>
+<script src="api.js"></script>
+<script src="student-nav.js"></script>
+<script>
+    let unitId, progress;
+    const STAGES = [
+        { key:'read_rules',          label:'Read rules' },
+        { key:'entered_preferences', label:'Enter preferences' },
+        { key:'in_team',             label:'Build or join team' },
+        { key:'submitted_request',   label:'Submit team request' },
+        { key:'teacher_approved',    label:'Teacher review' },
+    ];
+
+    (async () => {
+        const nav = await initStudentNav({ activeItem:'dashboard', pageTitle:'Student Dashboard' });
+        if (!nav) return;
+        unitId = nav.unitId;
+
+        const [unit, prog, teamData] = await Promise.all([
+            get(`/api/student/units/${unitId}`),
+            get(`/api/student/units/${unitId}/progress`),
+            get(`/api/student/units/${unitId}/my-team`).catch(() => ({ team:null }))
+        ]);
+        progress = prog;
+
+        // Deadline banner
+        if (unit.deadline) {
+            const d = new Date(unit.deadline);
+            document.getElementById('deadline-date').textContent =
+                d.toLocaleDateString('en-AU', { weekday:'long', hour:'numeric', minute:'2-digit' });
+            const diff = Math.ceil((d - Date.now()) / (1000*60*60*24));
+            document.getElementById('deadline-remaining').textContent =
+                diff > 0 ? `${diff} day${diff>1?'s':''} remaining` : 'Past deadline';
+        }
+
+        // Team status
+        if (teamData.team) {
+            document.getElementById('team-status-text').textContent =
+                teamData.team.status === 'SUBMITTED' ? 'Submitted — awaiting teacher review' :
+                    teamData.team.status === 'APPROVED'  ? 'Approved!' :
+                        `${teamData.members.length} member${teamData.members.length!==1?'s':''} · ${teamData.members.filter(m=>m.status==='WAITING').length} pending`;
+        } else {
+            document.getElementById('team-status-text').textContent = 'Incomplete — You have not submitted yet.';
+        }
+
+        // Progress rows
+        const rows = document.getElementById('progress-rows');
+        rows.innerHTML = STAGES.map(s => {
+            const done = prog[s.key] === 1;
+            const locked = s.key === 'teacher_approved' && !prog.submitted_request;
+            let dotClass = locked ? 's-dot-gray' : (done ? 't-dot-green' : 't-dot-red');
+            let statusText = locked ? 'Locked' : (done ? 'Completed' : (s.key==='read_rules' ? 'Not started' : 'In progress'));
+            let statusClass = locked ? 'locked' : (done ? 'completed' : (s.key==='read_rules'&&!done ? 'not-started':'in-progress'));
+            return `<div class="t-progress-row">
+        <div class="t-dot ${dotClass}"></div>
+        <span class="t-progress-label">${s.label}</span>
+        <span class="s-progress-status ${statusClass}">${statusText}</span>
+      </div>`;
+        }).join('');
+    })();
+
+    function continueSetup() {
+        if (!progress) return;
+        if (!progress.read_rules)          { goTo('rules'); return; }
+        if (!progress.entered_preferences) { goTo('preferences'); return; }
+        if (!progress.in_team)             { goTo('find-teammates'); return; }
+        if (!progress.submitted_request)   { goTo('my-team'); return; }
+        goTo('status');
+    }
+
+    function goTo(page) {
+        window.location = `/student-${page}.html?unitId=${unitId}`;
+    }
+</script>
+</body>
+</html>
