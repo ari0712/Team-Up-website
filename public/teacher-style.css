@@ -547,3 +547,15 @@ body.t-page {
 .t-modal-save:hover { background: #1a4fcc; }
 .t-modal-cancel { background: none; border: 1.5px solid #d0dff0; border-radius: 8px; padding: 11px 20px; font-size: 14px; font-weight: 700; cursor: pointer; color: #555; }
 .t-save-msg { font-size: 13px; color: #22c55e; font-weight: 600; min-height: 18px; margin-top: 8px; text-align: right; }
+/* Student sidebar refinements */
+.t-snav-active {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.t-sidebar-nav .t-snav-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}

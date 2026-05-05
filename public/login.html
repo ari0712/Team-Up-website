@@ -3,52 +3,203 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TeamUp – Login</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style1.css">
+  <style>
+    .auth-page {
+      min-height: 100vh;
+      background: #d3ecf5;
+      display: flex;
+      flex-direction: column;
+    }
+    .auth-header {
+      background: #ffffff;
+      border-bottom: 2.5px solid #2663ff;
+      padding: 16px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .auth-header-center {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+    .auth-logo-icon { width: 44px; height: 38px; }
+    .auth-logo-text { font-size: 1.9rem; font-weight: 800; line-height: 1; }
+    .auth-logo-text .team { color: #3d4f6e; }
+    .auth-logo-text .up   { color: #2663ff; }
+    .auth-portal-label {
+      font-size: 15px;
+      font-weight: 700;
+      color: #3a5a7a;
+    }
+    .auth-body {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 20px;
+    }
+    .auth-card {
+      background: #ffffff;
+      border: 2px solid #2663ff;
+      border-radius: 14px;
+      padding: 36px 40px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 4px 24px rgba(74,127,212,0.10);
+    }
+    .auth-card h2 {
+      font-size: 26px;
+      font-weight: 800;
+      color: #1a2a4a;
+      margin-bottom: 6px;
+    }
+    .auth-card .auth-subtitle {
+      font-size: 14px;
+      color: #5a7a9a;
+      margin-bottom: 28px;
+    }
+    .auth-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 18px;
+    }
+    .auth-field label {
+      font-size: 13px;
+      font-weight: 700;
+      color: #1a2a4a;
+    }
+    .auth-field input {
+      border: 1.5px solid #d0dff0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 14px;
+      color: #1a2a4a;
+      outline: none;
+      transition: border-color 0.15s;
+      width: 100%;
+      background: #fff;
+    }
+    .auth-field input:focus { border-color: #2663ff; }
+    .auth-error {
+      color: #e94560;
+      font-size: 13px;
+      min-height: 18px;
+      margin-bottom: 10px;
+    }
+    .auth-btn {
+      display: block;
+      width: 100%;
+      background: #2663ff;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-bottom: 18px;
+    }
+    .auth-btn:hover { background: #1a4fcc; }
+    .auth-footer-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-size: 13px;
+      color: #5a7a9a;
+    }
+    .auth-link-btn {
+      background: none;
+      border: none;
+      color: #2663ff;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .auth-back-btn {
+      background: none;
+      border: none;
+      color: #5a7a9a;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0;
+    }
+    .auth-back-btn:hover { color: #1a2a4a; }
+    .auth-footer {
+      text-align: center;
+      font-size: 12px;
+      color: #8aabbf;
+      padding: 12px;
+    }
+  </style>
 </head>
-<body>
-<div class="page">
-  <div class="topbar">
-    <button class="back-btn" onclick="window.location='/'">← Back</button>
-    <span class="logo">TeamUp</span>
-    <span class="title" id="portalLabel">Student Portal</span>
-  </div>
-  <div class="content-center">
-    <div class="card">
-      <div>
-        <h2 style="font-size:28px;margin-bottom:4px;">Welcome back</h2>
-        <p class="subtitle-text">Sign in to continue</p>
-      </div>
-      <div class="field-group">
-        <label id="usernameLabel">Username</label>
-        <input id="username" type="text" placeholder="Enter username" autocomplete="username">
-      </div>
-      <div class="field-group">
-        <label>Password</label>
-        <input id="password" type="password" placeholder="Enter password" autocomplete="current-password">
-      </div>
-      <div class="error-text" id="errorMsg"></div>
-      <button class="btn btn-primary" onclick="doLogin()">Login</button>
-      <div class="row" style="justify-content:center;gap:6px;">
-        <span class="muted" style="font-size:13px;">Don't have an account?</span>
-        <button class="link-btn" onclick="goSignUp()">Sign Up</button>
-      </div>
+<body class="auth-page">
+
+<header class="auth-header">
+  <button class="auth-back-btn" onclick="window.location='/'">← Back</button>
+  <a class="auth-header-center" href="/">
+    <img class="auth-logo-icon" src="teamup-icon.png" alt="TeamUp">
+    <span class="auth-logo-text">
+        <span class="team">Team</span><span class="up">Up</span>
+      </span>
+  </a>
+  <span class="auth-portal-label" id="portalLabel">Student Portal</span>
+</header>
+
+<div class="auth-body">
+  <div class="auth-card">
+    <h2>Welcome back</h2>
+    <p class="auth-subtitle">Sign in to continue</p>
+
+    <div class="auth-field">
+      <label>Username</label>
+      <input id="username" type="text" placeholder="Enter your username" autocomplete="username">
+    </div>
+    <div class="auth-field">
+      <label>Password</label>
+      <input id="password" type="password" placeholder="Enter your password" autocomplete="current-password">
+    </div>
+
+    <div class="auth-error" id="errorMsg"></div>
+
+    <button class="auth-btn" onclick="doLogin()">Login</button>
+
+    <div class="auth-footer-row">
+      <span>Don't have an account?</span>
+      <button class="auth-link-btn" onclick="goSignUp()">Sign Up</button>
     </div>
   </div>
 </div>
+
+<footer class="auth-footer">High Fidelity Design Concept.</footer>
+
 <script src="api.js"></script>
 <script>
   const params = new URLSearchParams(location.search);
   const role = params.get('role') || 'STUDENT';
-  document.getElementById('portalLabel').textContent = role === 'STUDENT' ? 'Student Portal' : 'Teacher Portal';
+  document.getElementById('portalLabel').textContent =
+          role === 'STUDENT' ? 'Student Portal' : 'Teacher Portal';
 
-  document.getElementById('password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  document.getElementById('password').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
 
   async function doLogin() {
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
-    const errEl = document.getElementById('errorMsg');
+    const errEl    = document.getElementById('errorMsg');
     errEl.textContent = '';
-    if (!username || !password) { errEl.textContent = 'Please enter your username and password.'; return; }
+    if (!username || !password) {
+      errEl.textContent = 'Please enter your username and password.';
+      return;
+    }
     try {
       const user = await post('/api/auth/login', { username, password, role });
       if (user.role === 'STUDENT') {
@@ -56,7 +207,7 @@
       } else {
         window.location = '/teacher-home.html';
       }
-    } catch (e) { errEl.textContent = e.message; }
+    } catch(e) { errEl.textContent = e.message; }
   }
 
   function goSignUp() { window.location = `/signup.html?role=${role}`; }
