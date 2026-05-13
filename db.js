@@ -185,6 +185,21 @@ async function initDb() {
   // ── Stable per-unit team number (drives 'Team N' naming) ─────
   try { db.run(`ALTER TABLE unit_teams ADD COLUMN team_number INTEGER DEFAULT 0`); } catch(e) {}
 
+  // ── Teacher-managed tutorial slots per unit ─────────────────────
+  db.run(`CREATE TABLE IF NOT EXISTS unit_tutorial_slots (
+    slot_id    TEXT PRIMARY KEY,
+    unit_id    TEXT NOT NULL,
+    label      TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    UNIQUE(unit_id, label),
+    FOREIGN KEY (unit_id) REFERENCES units(unit_id)
+  )`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_tutorial_slots_unit
+            ON unit_tutorial_slots(unit_id, sort_order)`);
+
+  // Seed from existing CSV data (one-shot, guarded inside).
+  migrateTutorialSlots(db);
+
   // ── PROPOSAL SYSTEM: one-shot migration from legacy invites ───
   migrateToProposalModel(db);
 
@@ -381,6 +396,61 @@ function migrateToProposalModel(db) {
     db.run('ROLLBACK');
     throw e;
   }
+}
+
+// One-shot seed: collect distinct tutorial-slot labels from existing student
+// data (unit_students.tutorial_time + student_unit_prefs.tutorial_slots) and
+// insert them into unit_tutorial_slots. Skips entirely once any slot row
+// exists — teachers manage from there.
+function migrateTutorialSlots(db) {
+  const guard = db.prepare(`SELECT COUNT(*) AS n FROM unit_tutorial_slots`);
+  guard.step();
+  const { n } = guard.getAsObject();
+  guard.free();
+  if (n > 0) return;
+
+  const unitsStmt = db.prepare(`SELECT unit_id FROM units`);
+  const units = [];
+  while (unitsStmt.step()) units.push(unitsStmt.getAsObject().unit_id);
+  unitsStmt.free();
+
+  let total = 0;
+  for (const unitId of units) {
+    const slotSet = new Set();
+
+    const usStmt = db.prepare(
+      `SELECT tutorial_time FROM unit_students WHERE unit_id = ?`
+    );
+    usStmt.bind([unitId]);
+    while (usStmt.step()) {
+      const v = usStmt.getAsObject().tutorial_time || '';
+      v.split(',').map(s => s.trim()).filter(Boolean).forEach(s => slotSet.add(s));
+    }
+    usStmt.free();
+
+    const supStmt = db.prepare(
+      `SELECT tutorial_slots FROM student_unit_prefs WHERE unit_id = ?`
+    );
+    supStmt.bind([unitId]);
+    while (supStmt.step()) {
+      const v = supStmt.getAsObject().tutorial_slots || '';
+      v.split(',').map(s => s.trim()).filter(Boolean).forEach(s => slotSet.add(s));
+    }
+    supStmt.free();
+
+    if (slotSet.size === 0) continue;
+
+    let i = 0;
+    for (const label of [...slotSet].sort()) {
+      db.run(
+        `INSERT INTO unit_tutorial_slots (slot_id, unit_id, label, sort_order)
+         VALUES (?,?,?,?)`,
+        [crypto.randomUUID(), unitId, label, i++]
+      );
+      total++;
+    }
+  }
+  if (total) console.log(`Tutorial-slot seed: imported ${total} slot rows`);
 }
 
 // Compacts team_number per unit so names are always contiguous Team 1..N.

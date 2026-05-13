@@ -148,6 +148,46 @@
             cursor: pointer;
             margin-top: 16px;
         }
+        .tf-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .tf-tab {
+            flex: 1;
+            min-width: 160px;
+            background: #fff;
+            border: 1.5px solid #d0dff0;
+            border-left: 5px solid #d0dff0;
+            border-radius: 10px;
+            padding: 14px 16px;
+            cursor: pointer;
+            text-align: left;
+            transition: transform 0.1s, box-shadow 0.15s;
+        }
+        .tf-tab:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.06); }
+        .tf-tab-label { font-size: 14px; font-weight: 800; color: #1a2a4a; margin-bottom: 4px; }
+        .tf-tab-count { font-size: 13px; color: #666; font-weight: 600; }
+        .tf-tab-count strong { font-size: 18px; color: #1a2a4a; }
+        .tf-tab.tf-tab-submitted { border-left-color: #2663ff; }
+        .tf-tab.tf-tab-forming   { border-left-color: #f5a623; }
+        .tf-tab.tf-tab-approved  { border-left-color: #22c55e; }
+        .tf-tab.tf-tab-rejected  { border-left-color: #e94560; }
+        .tf-tab.active { background: #1a2a4a; }
+        .tf-tab.active .tf-tab-label,
+        .tf-tab.active .tf-tab-count,
+        .tf-tab.active .tf-tab-count strong { color: #fff; }
+        .tf-section-empty {
+            color: #888;
+            font-size: 14px;
+            font-style: italic;
+            padding: 24px;
+            text-align: center;
+            background: #fff;
+            border: 1.5px dashed #d0dff0;
+            border-radius: 10px;
+        }
     </style>
 </head>
 <body class="t-page">
@@ -168,13 +208,9 @@
     <nav class="t-sidebar-nav" id="teacher-sidebar"></nav>
 
     <main class="t-dash-content">
-        <div id="teams-grid" class="tf-grid">
+        <div id="status-tabs" class="tf-tabs"></div>
+        <div id="teams-sections">
             <p class="t-empty">Loading teams…</p>
-        </div>
-        <div class="tf-pagination">
-            <button id="prevBtn" onclick="changePage(-1)" disabled>← Prev Page</button>
-            <span id="pageLabel">Page 1</span>
-            <button id="nextBtn" onclick="changePage(1)">Next Page →</button>
         </div>
     </main>
 
@@ -183,6 +219,8 @@
     <aside class="t-progress-aside">
         <h2 class="t-progress-heading">Summary</h2>
         <div id="summary-rows" class="t-progress-rows"></div>
+        <button id="approveAllBtn" class="t-view-progress-btn" style="display:none;margin-top:14px"
+                onclick="approveAllSubmitted()">Approve All Submitted</button>
     </aside>
 </div>
 
@@ -200,8 +238,15 @@
 <script>
     const params = new URLSearchParams(location.search);
     const unitId = params.get('unitId');
-    const PAGE_SIZE = 4;
-    let allTeams = [], currentPage = 1;
+    let allTeams = [];
+    let activeStatus = 'SUBMITTED';
+
+    const STATUS_GROUPS = [
+        { key: 'SUBMITTED', label: 'Submitted', cls: 'tf-tab-submitted', hideWhenEmpty: false },
+        { key: 'FORMING',   label: 'Forming',   cls: 'tf-tab-forming',   hideWhenEmpty: false },
+        { key: 'APPROVED',  label: 'Approved',  cls: 'tf-tab-approved',  hideWhenEmpty: false },
+        { key: 'REJECTED',  label: 'Rejected',  cls: 'tf-tab-rejected',  hideWhenEmpty: true  },
+    ];
 
     (async () => {
         const user = await requireSession('TEACHER');
@@ -215,30 +260,68 @@
     async function loadTeams() {
         try {
             allTeams = await get(`/api/units/${unitId}/all-teams`);
-            if (!allTeams.length) {
-                document.getElementById('teams-grid').innerHTML =
-                    '<p class="t-empty">No teams currently forming.</p>';
-                updatePagination();
-                renderSummary();
-                return;
-            }
-            renderPage();
+            renderTabs();
+            renderActiveSection();
             renderSummary();
         } catch(e) {
-            document.getElementById('teams-grid').innerHTML =
+            document.getElementById('teams-sections').innerHTML =
                 `<p class="t-empty">Error: ${e.message}</p>`;
         }
     }
 
-    function renderPage() {
-        const start = (currentPage - 1) * PAGE_SIZE;
-        const page  = allTeams.slice(start, start + PAGE_SIZE);
-        const grid  = document.getElementById('teams-grid');
+    function studentCountFor(status) {
+        return allTeams
+            .filter(t => t.status === status)
+            .reduce((sum, t) => sum + t.members.length, 0);
+    }
 
-        grid.innerHTML = page.map(team => {
-            const v = team.validation;
-            const statusClass = `tf-status-${team.status.toLowerCase()}`;
+    function renderTabs() {
+        const visible = STATUS_GROUPS.filter(g =>
+            !g.hideWhenEmpty || allTeams.some(t => t.status === g.key)
+        );
+        // If the active tab is hidden (e.g. no SUBMITTED on load), fall back to the first visible one.
+        if (!visible.some(g => g.key === activeStatus) && visible.length) {
+            activeStatus = visible[0].key;
+        }
+        document.getElementById('status-tabs').innerHTML = visible.map(g => {
+            const teamCount    = allTeams.filter(t => t.status === g.key).length;
+            const studentCount = studentCountFor(g.key);
             return `
+              <button class="tf-tab ${g.cls} ${activeStatus === g.key ? 'active' : ''}"
+                      onclick="selectStatus('${g.key}')">
+                <div class="tf-tab-label">${g.label}</div>
+                <div class="tf-tab-count">
+                  <strong>${studentCount}</strong> student${studentCount !== 1 ? 's' : ''}
+                  · ${teamCount} team${teamCount !== 1 ? 's' : ''}
+                </div>
+              </button>`;
+        }).join('');
+    }
+
+    function selectStatus(key) {
+        activeStatus = key;
+        renderTabs();
+        renderActiveSection();
+    }
+
+    function renderActiveSection() {
+        const container = document.getElementById('teams-sections');
+        if (!allTeams.length) {
+            container.innerHTML = '<p class="t-empty">No teams currently in this unit.</p>';
+            return;
+        }
+        const teams = allTeams.filter(t => t.status === activeStatus);
+        if (!teams.length) {
+            container.innerHTML = `<p class="tf-section-empty">No ${activeStatus.toLowerCase()} teams yet.</p>`;
+            return;
+        }
+        container.innerHTML = `<div class="tf-grid">${teams.map(cardHtml).join('')}</div>`;
+    }
+
+    function cardHtml(team) {
+        const v = team.validation;
+        const statusClass = `tf-status-${team.status.toLowerCase()}`;
+        return `
             <div class="tf-team-card">
                 <div class="tf-team-id">
                     ${team.team_name || team.team_id.slice(0,8)}
@@ -251,34 +334,15 @@
                 <div class="tf-val-row">
                     <div class="tf-dot ${v.tutorialShared ? 'tf-dot-green' : 'tf-dot-red'}"></div>
                     ${v.tutorialShared
-                ? `Members share ${v.sharedTutorials[0]}`
-                : 'No shared tutorial slot'}
+                        ? `Members share ${v.sharedTutorials[0]}`
+                        : 'No shared tutorial slot'}
                 </div>
                 <div class="tf-val-row">
                     <div class="tf-dot ${v.newToQutOk ? 'tf-dot-green' : 'tf-dot-red'}"></div>
                     New-to-QUT students: ${v.newToQutCount} / ${v.maxNewToQut}
                 </div>
-                <div class="tf-val-row">
-                    <div class="tf-dot ${v.allAccepted ? 'tf-dot-green' : 'tf-dot-red'}"></div>
-                    ${v.allAccepted ? 'All members accepted' : 'Waiting for invited member to accept'}
-                </div>
                 <button class="tf-view-btn" onclick="viewTeam('${team.team_id}')">View Team</button>
             </div>`;
-        }).join('');
-
-        updatePagination();
-    }
-
-    function updatePagination() {
-        const totalPages = Math.max(1, Math.ceil(allTeams.length / PAGE_SIZE));
-        document.getElementById('pageLabel').textContent = `Page ${currentPage} of ${totalPages}`;
-        document.getElementById('prevBtn').disabled = currentPage <= 1;
-        document.getElementById('nextBtn').disabled = currentPage >= totalPages;
-    }
-
-    function changePage(dir) {
-        currentPage += dir;
-        renderPage();
     }
 
     function renderSummary() {
@@ -286,6 +350,7 @@
         const submitted = allTeams.filter(t => t.status === 'SUBMITTED').length;
         const approved  = allTeams.filter(t => t.status === 'APPROVED').length;
         const forming   = allTeams.filter(t => t.status === 'FORMING').length;
+        document.getElementById('approveAllBtn').style.display = submitted > 0 ? 'block' : 'none';
         document.getElementById('summary-rows').innerHTML = `
             <div class="t-progress-row">
                 <div class="t-dot t-dot-green"></div>
@@ -346,6 +411,17 @@
         try {
             await put(`/api/units/${unitId}/team-requests/${teamId}`, { action });
             closeModal();
+            await loadTeams();
+        } catch(e) { alert(e.message); }
+    }
+
+    async function approveAllSubmitted() {
+        const submitted = allTeams.filter(t => t.status === 'SUBMITTED').length;
+        if (!submitted) return;
+        if (!confirm(`Approve all ${submitted} submitted team${submitted!==1?'s':''}?`)) return;
+        try {
+            const r = await post(`/api/units/${unitId}/team-requests/approve-all`, {});
+            alert(`Approved ${r.approved} team${r.approved!==1?'s':''}.`);
             await loadTeams();
         } catch(e) { alert(e.message); }
     }

@@ -161,6 +161,16 @@ router.put('/units/:unitId/progress', (req, res) => {
     res.json({ ok: true });
 });
 
+// ── GET /api/student/units/:unitId/tutorial-slots ─────────────
+router.get('/units/:unitId/tutorial-slots', (req, res) => {
+    const slots = all(
+        `SELECT slot_id, label, sort_order FROM unit_tutorial_slots
+          WHERE unit_id = ? ORDER BY sort_order, label`,
+        [req.params.unitId]
+    );
+    res.json(slots);
+});
+
 // ── GET /api/student/units/:unitId/prefs ──────────────────────
 router.get('/units/:unitId/prefs', (req, res) => {
     const row = get(

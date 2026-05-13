@@ -38,9 +38,6 @@
             <input id="search" type="text" placeholder="Search by name or student ID…" oninput="filterStudents()">
             <select id="filter-tutorial" onchange="filterStudents()">
                 <option value="">Any tutorial</option>
-                <option>Monday 10:00 AM</option><option>Monday 2:00 PM</option>
-                <option>Tuesday 9:00 AM</option><option>Wednesday 1:00 PM</option>
-                <option>Thursday 11:00 AM</option><option>Friday 10:00 AM</option>
             </select>
             <select id="filter-interest" onchange="filterStudents()">
                 <option value="">Any interest</option>
@@ -72,6 +69,17 @@
         const nav = await initStudentNav({ activeItem:'find-teammates', pageTitle:'Find Teammates' });
         if (!nav) return;
         unitId = nav.unitId;
+
+        // Populate the tutorial-time filter from the teacher's slot list.
+        try {
+            const slots = await get(`/api/student/units/${unitId}/tutorial-slots`);
+            const sel = document.getElementById('filter-tutorial');
+            slots.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.label; opt.textContent = s.label;
+                sel.appendChild(opt);
+            });
+        } catch(e) { console.error('Could not load tutorial slots:', e); }
 
         // Every enrolled student is on a team-of-1, so we don't need to fetch it here.
         allStudents = await get(`/api/student/units/${unitId}/students`);
