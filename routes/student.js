@@ -366,6 +366,38 @@ router.delete('/units/:unitId/teams/:teamId/members/:studentId', (req, res) => {
     res.json({ ok: true });
 });
 
+// ── DELETE /api/student/units/:unitId/teams/:teamId/leave ──────
+router.delete('/units/:unitId/teams/:teamId/leave', (req, res) => {
+    const studentId = sid(req);
+    const team = get(`SELECT * FROM unit_teams WHERE team_id = ? AND unit_id = ?`,
+        [req.params.teamId, req.params.unitId]);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
+    const membership = get(`SELECT * FROM unit_team_members WHERE team_id = ? AND student_id = ?`,
+        [req.params.teamId, studentId]);
+    if (!membership) return res.status(400).json({ error: 'You are not in this team' });
+
+    if (team.status !== 'FORMING')
+        return res.status(400).json({ error: 'Cannot leave a submitted team' });
+
+    run(`DELETE FROM unit_team_members WHERE team_id = ? AND student_id = ?`,
+        [req.params.teamId, studentId]);
+    run(`UPDATE student_progress SET in_team = 0 WHERE unit_id = ? AND student_id = ?`,
+        [req.params.unitId, studentId]);
+    run(`UPDATE unit_team_invites SET status = 'DECLINED' WHERE team_id = ? AND to_student = ?`,
+        [req.params.teamId, studentId]);
+
+    const remaining = all(`SELECT * FROM unit_team_members WHERE team_id = ?`, [req.params.teamId]);
+    if (remaining.length === 0) {
+        run(`DELETE FROM unit_teams WHERE team_id = ?`, [req.params.teamId]);
+    } else if (team.created_by === studentId) {
+        const newOwner = remaining.find(m => m.status === 'ACCEPTED') || remaining[0];
+        run(`UPDATE unit_teams SET created_by = ? WHERE team_id = ?`, [newOwner.student_id, req.params.teamId]);
+    }
+
+    res.json({ ok: true });
+});
+
 // ── POST /api/student/units/:unitId/teams/:teamId/submit ──────
 router.post('/units/:unitId/teams/:teamId/submit', (req, res) => {
     const team = get(`SELECT * FROM unit_teams WHERE team_id = ? AND unit_id = ?`,

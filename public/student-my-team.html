@@ -112,7 +112,7 @@
         ${!isSubmitted ? `<button class="t-open-btn" style="width:220px;${!allGreen?'background:#aaa;cursor:not-allowed':''}"
             ${!allGreen?'disabled':''} onclick="submitTeam()">Submit Team Request</button>` : ''}
         ${isSubmitted ? `<button class="t-open-btn" style="width:220px;background:#1a2a4a" onclick="window.location='/student-status.html?unitId=${unitId}'">View Status</button>` : ''}
-        ${!isSubmitted ? `<button class="t-open-btn" style="width:180px;background:#e94560" onclick="confirmCancel()">Cancel Request</button>` : ''}
+        ${!isSubmitted ? `<button class="t-open-btn" style="width:180px;background:#e94560" onclick="leaveTeam()">Leave Team</button>` : ''}
       </div>`;
     }
 
@@ -130,10 +130,12 @@
         } catch(e) { alert(e.message); }
     }
 
-    function confirmCancel() {
-        if (confirm('Are you sure you want to cancel your team request? This cannot be undone.')) {
-            alert('Cancel flow coming soon.');
-        }
+    async function leaveTeam() {
+        if (!confirm('Are you sure you want to leave this team?')) return;
+        try {
+            await fetch(`/api/student/units/${unitId}/teams/${teamData.team.team_id}/leave`, { method: 'DELETE' });
+            window.location = `/student-dashboard.html?unitId=${unitId}`;
+        } catch(e) { alert(e.message); }
     }
 </script>
 </body>

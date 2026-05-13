@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\arvij\\\\OneDrive\\\\teamup-web\\\\teamup-web\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "PowerShell(head *)"
+    ]
+  }
+}
