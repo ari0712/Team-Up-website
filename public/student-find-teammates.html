@@ -66,17 +66,14 @@
 <script src="api.js"></script>
 <script src="student-nav.js"></script>
 <script>
-    let allStudents = [], myTeamId = null, unitId;
+    let allStudents = [], unitId;
 
     (async () => {
         const nav = await initStudentNav({ activeItem:'find-teammates', pageTitle:'Find Teammates' });
         if (!nav) return;
         unitId = nav.unitId;
 
-        // Get my team id if I have one
-        const teamData = await get(`/api/student/units/${unitId}/my-team`).catch(() => ({team:null}));
-        if (teamData.team) myTeamId = teamData.team.team_id;
-
+        // Every enrolled student is on a team-of-1, so we don't need to fetch it here.
         allStudents = await get(`/api/student/units/${unitId}/students`);
         renderStudents(allStudents);
     })();
@@ -114,9 +111,9 @@
           <div class="s-invite-row">
             <button class="t-open-btn" style="width:140px;background:#fff;color:#2663ff;border:1.5px solid #2663ff"
               onclick="viewProfile('${s.student_id}','${(s.name||s.student_id).replace(/'/g,"\\'")}','${s.preferred_role||''}','${tutorial}','${interests.join(';')}','${skills.join(';')}')">View Profile</button>
-            ${myTeamId
-                ? `<button class="t-open-btn" style="width:140px" onclick="invite('${s.student_id}')">Invite to Team</button>`
-                : `<button class="t-open-btn" style="width:140px;background:#1a2a4a" onclick="createAndInvite('${s.student_id}')">Create Team &amp; Invite</button>`
+            ${s.team_id
+                ? `<button class="t-open-btn" style="width:140px" onclick="proposeMerge('${s.team_id}')">Propose Merge</button>`
+                : `<button class="t-open-btn" style="width:140px;background:#aaa;cursor:not-allowed" disabled>No team yet</button>`
             }
           </div>
         </div>
@@ -124,21 +121,15 @@
         }).join('');
     }
 
-    async function invite(toStudentId) {
+    async function proposeMerge(targetTeamId) {
         try {
-            await post(`/api/student/units/${unitId}/teams/${myTeamId}/invite`, { toStudentId });
-            alert('Invitation sent!');
-        } catch(e) { alert(e.message); }
-    }
-
-    async function createAndInvite(toStudentId) {
-        const teamName = prompt('Enter a team name:', 'My Team');
-        if (!teamName) return;
-        try {
-            const r = await post(`/api/student/units/${unitId}/teams`, { teamName });
-            myTeamId = r.teamId;
-            await post(`/api/student/units/${unitId}/teams/${myTeamId}/invite`, { toStudentId });
-            alert('Team created and invitation sent!');
+            const r = await post(`/api/student/units/${unitId}/proposals`, { targetTeamId });
+            if (r.state === 'approved') {
+                alert('Merge approved! Your teams are now combined.');
+                window.location = `/student-my-team.html?unitId=${unitId}`;
+            } else {
+                alert('Merge proposal sent. Awaiting votes from both teams.');
+            }
         } catch(e) { alert(e.message); }
     }
 

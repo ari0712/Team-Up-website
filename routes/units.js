@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const { all, run, get } = require('../db');
 const { requireTeacher, requireStudent } = require('../middleware/auth');
+const { parseTeamSizesCsv } = require('../utils/teamSizes');
 const crypto = require('crypto');
 
 // ── GET /api/units — list teacher's units ────────────────────────
@@ -55,6 +56,9 @@ router.post('/', requireTeacher, (req, res) => {
 
     if (!unitName || !unitName.trim())
         return res.status(400).json({ error: 'Unit name is required' });
+
+    if (validTeamSizes !== undefined && parseTeamSizesCsv(validTeamSizes) === null)
+        return res.status(400).json({ error: 'validTeamSizes must be comma-separated positive integers' });
 
     const unitId       = crypto.randomUUID();
     const studentCount = Array.isArray(students) ? students.length : 0;
@@ -334,6 +338,9 @@ router.put('/:unitId/rules', requireTeacher, (req, res) => {
     if (!unit) return res.status(404).json({ error: 'Unit not found' });
 
     const { validTeamSizes, maxOneGroup, mustShareTutorial, maxNewToQut, deadline } = req.body;
+
+    if (validTeamSizes !== undefined && parseTeamSizesCsv(validTeamSizes) === null)
+        return res.status(400).json({ error: 'validTeamSizes must be comma-separated positive integers' });
 
     run(
         `UPDATE units SET

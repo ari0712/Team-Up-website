@@ -74,10 +74,10 @@
             <button class="t-open-btn" style="margin-top:14px;width:160px"
                     onclick="goTo('my-team')">View Status</button>
         </div>
-        <!-- Incoming invites -->
+        <!-- Merge proposals -->
         <div class="s-card" id="invites-card" style="display:none">
             <h3 style="font-size:17px;font-weight:800;margin-bottom:14px">
-                📬 Team Invitations
+                📬 Merge Proposals
                 <span id="invite-count-badge" style="background:#e94560;color:#fff;font-size:12px;font-weight:700;padding:2px 8px;border-radius:20px;margin-left:8px"></span>
             </h3>
             <div id="invites-list"></div>
@@ -121,7 +121,7 @@
             requireUnitAccess(unitId),
             get(`/api/student/units/${unitId}/progress`),
             get(`/api/student/units/${unitId}/my-team`).catch(() => ({ team: null })),
-            loadInvites()   // ← add this
+            loadProposals()
         ]);
         progress = prog;
 
@@ -140,7 +140,7 @@
             document.getElementById('team-status-text').textContent =
                 teamData.team.status === 'SUBMITTED' ? 'Submitted — awaiting teacher review' :
                     teamData.team.status === 'APPROVED'  ? 'Approved!' :
-                        `${teamData.members.length} member${teamData.members.length!==1?'s':''} · ${teamData.members.filter(m=>m.status==='WAITING').length} pending`;
+                        `${teamData.members.length} member${teamData.members.length!==1?'s':''}`;
         } else {
             document.getElementById('team-status-text').textContent = 'Incomplete — You have not submitted yet.';
         }
@@ -174,63 +174,71 @@
         window.location = `/student-${page}.html?unitId=${unitId}`;
     }
 
-    async function loadInvites() {
+    async function loadProposals() {
         try {
-            const invites = await get(`/api/student/units/${unitId}/invites`);
-            const card    = document.getElementById('invites-card');
-            const list    = document.getElementById('invites-list');
+            const proposals = await get(`/api/student/units/${unitId}/proposals`);
+            const card = document.getElementById('invites-card');
+            const list = document.getElementById('invites-list');
 
-            if (!invites.length) {
-                card.style.display = 'none';
-                return;
-            }
+            const open = proposals.filter(p => p.state === 'open');
+            if (!proposals.length) { card.style.display = 'none'; return; }
 
             card.style.display = 'block';
-            document.getElementById('invite-count-badge').textContent = invites.length;
+            document.getElementById('invite-count-badge').textContent = open.length || proposals.length;
 
-            list.innerHTML = invites.map(inv => `
-          <div class="invite-row" id="invite-row-${inv.invite_id}">
-            <div class="invite-info">
-              <strong>${inv.from_name || inv.from_student}</strong> invited you to join
-              <strong>${inv.team_name || 'their team'}</strong>
-              <br><span>Sent ${new Date(inv.sent_at).toLocaleString('en-AU', { weekday:'short', hour:'numeric', minute:'2-digit' })}</span>
-            </div>
-            <div class="invite-actions">
-              <button class="btn-accept"  onclick="respondInvite('${inv.invite_id}', 'accept')">Accept</button>
-              <button class="btn-decline" onclick="respondInvite('${inv.invite_id}', 'decline')">Decline</button>
-            </div>
-          </div>
-        `).join('');
-
+            list.innerHTML = proposals.map(p => {
+                const isOpen = p.state === 'open';
+                const stateLabel = isOpen
+                    ? `${p.tally.yes}/${p.tally.yes + p.tally.no + p.tally.pending} yes`
+                    : p.state.replace('_', ' ');
+                const otherName = p.source_team_name && p.target_team_name
+                    ? `${p.source_team_name} ↔ ${p.target_team_name}`
+                    : 'merge proposal';
+                return `
+                  <div class="invite-row" id="invite-row-${p.proposal_id}">
+                    <div class="invite-info">
+                      <strong>${otherName}</strong>
+                      <br><span>Your vote: ${p.my_vote} · ${stateLabel}</span>
+                    </div>
+                    <div class="invite-actions">
+                      ${isOpen ? `
+                        <button class="btn-accept"  onclick="castVote('${p.proposal_id}','yes')">Yes</button>
+                        <button class="btn-decline" onclick="castVote('${p.proposal_id}','no')">No</button>
+                      ` : `
+                        <button class="btn-decline" onclick="dismissProposal('${p.proposal_id}')">Dismiss</button>
+                      `}
+                    </div>
+                  </div>
+                `;
+            }).join('');
         } catch(e) {
-            // Silently fail — invites are a non-critical section
-            console.error('Could not load invites:', e);
+            console.error('Could not load proposals:', e);
         }
     }
 
-    async function respondInvite(inviteId, action) {
+    async function castVote(proposalId, vote) {
         try {
-            await fetch(`/api/student/units/${unitId}/invites/${inviteId}`, {
-                method: 'PUT',
+            const res = await fetch(`/api/student/units/${unitId}/proposals/${proposalId}/vote`, {
+                method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action })
+                body: JSON.stringify({ vote })
             });
-
-            if (action === 'accept') {
-                // Reload the whole page so team status + progress update
+            const result = await res.json();
+            if (result.resolved && result.state === 'approved') {
                 window.location.reload();
             } else {
-                // Just remove the row for decline
-                const row = document.getElementById(`invite-row-${inviteId}`);
-                if (row) row.remove();
-                // Hide card if no more invites
-                const remaining = document.querySelectorAll('[id^="invite-row-"]');
-                if (!remaining.length) document.getElementById('invites-card').style.display = 'none';
+                await loadProposals();
             }
-
         } catch(e) {
-            alert('Could not respond to invite: ' + e.message);
+            alert('Could not cast vote: ' + e.message);
         }
+    }
+
+    async function dismissProposal(proposalId) {
+        try {
+            await fetch(`/api/student/units/${unitId}/proposals/${proposalId}/seen`, { method: 'PATCH' });
+            await loadProposals();
+        } catch(e) { console.error(e); }
     }
 </script>
 </body>

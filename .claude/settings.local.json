@@ -3,7 +3,14 @@
     "allow": [
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\arvij\\\\OneDrive\\\\teamup-web\\\\teamup-web\" -Recurse -Directory)",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "PowerShell(head *)"
+      "PowerShell(head *)",
+      "Bash(node -c teamup-web/db.js)",
+      "Bash(node --check db.js)",
+      "Bash(node --check services/proposalService.js)",
+      "Bash(node --check routes/units.js)",
+      "Bash(node --check routes/student.js)",
+      "Bash(node --check server.js)",
+      "Bash(node *)"
     ]
   }
 }
