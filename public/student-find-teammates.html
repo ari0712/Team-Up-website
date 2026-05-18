@@ -118,7 +118,7 @@
           </div>
           <div class="s-invite-row">
             <button class="t-open-btn" style="width:140px;background:#fff;color:#2663ff;border:1.5px solid #2663ff"
-              onclick="viewProfile('${s.student_id}','${(s.name||s.student_id).replace(/'/g,"\\'")}','${s.preferred_role||''}','${tutorial}','${interests.join(';')}','${skills.join(';')}')">View Profile</button>
+              onclick="viewProfile('${s.student_id}')">View Profile</button>
             ${s.team_id
                 ? `<button class="t-open-btn" style="width:140px" onclick="proposeMerge('${s.team_id}')">Propose Merge</button>`
                 : `<button class="t-open-btn" style="width:140px;background:#aaa;cursor:not-allowed" disabled>No team yet</button>`
@@ -141,8 +141,8 @@
         } catch(e) { alert(e.message); }
     }
 
-    function viewProfile(id, name, role, tutorial, interests, skills) {
-        alert(`${name}\nID: ${id}\nRole: ${role || 'Not set'}\nTutorial: ${tutorial || 'Not set'}\nInterests: ${interests.replace(/;/g,', ')||'None'}\nSkills: ${skills.replace(/;/g,', ')||'None'}`);
+    function viewProfile(id) {
+        window.location = `/student-classmate-profile.html?unitId=${unitId}&studentId=${encodeURIComponent(id)}`;
     }
 </script>
 </body>

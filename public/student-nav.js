@@ -7,6 +7,7 @@ const STUDENT_NAV_ITEMS = [
     { key: 'my-team',        label: 'My Team',        href: '/student-my-team.html',          stage: 'in_team' },
     { key: 'status',         label: 'Status',         href: '/student-status.html',           stage: 'submitted_request' },
     { key: 'final-team',     label: 'Final Team',     href: '/student-final-team.html',       stage: 'teacher_approved' },
+    { key: 'profile',        label: 'Your Profile',   href: '/student-profile.html' },
 ];
 
 async function initStudentNav({ activeItem, pageTitle }) {
