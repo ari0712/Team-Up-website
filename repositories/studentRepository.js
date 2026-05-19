@@ -1,7 +1,7 @@
 const { all, get, run } = require('../db');
 
 const JOIN = `
-  SELECT u.username, u.password_hash, u.email,
+  SELECT u.username, u.password_hash, u.email, u.student_id,
          s.display_name, s.tutorial_availability, s.major, s.units_passed, s.team_id
   FROM users u JOIN students s ON u.username = s.username
 `;
@@ -12,6 +12,7 @@ function mapStudent(row) {
     username: row.username,
     passwordHash: row.password_hash,
     email: row.email,
+    studentId: row.student_id,
     displayName: row.display_name,
     tutorialAvailability: row.tutorial_availability,
     major: row.major,
