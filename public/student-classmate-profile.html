@@ -6,28 +6,26 @@
     <link rel="stylesheet" href="style1.css">
     <link rel="stylesheet" href="teacher-style.css">
     <style>
+        body.t-page { min-height: 100vh; height: auto; overflow: visible; }
+        .t-dashboard-layout { min-height: auto; }
         .classmate-shell {
             flex: 1;
-            overflow-y: auto;
+            min-width: 0;
             background: #d3ecf5;
             padding: 34px 64px 24px;
         }
         .classmate-card {
             background: #fff;
             border-radius: 8px;
-            min-height: 570px;
             padding: 30px 64px 34px;
             color: #2a3a4a;
-        }
-        .classmate-card.invite-state {
-            background: transparent;
-            padding: 0;
+            height: auto;
         }
         .classmate-grid {
             display: grid;
             grid-template-columns: minmax(280px, 360px) 1px minmax(320px, 1fr);
             gap: 64px;
-            align-items: start;
+            align-items: stretch;
         }
         .classmate-name {
             font-size: 20px;
@@ -67,9 +65,9 @@
         }
         .classmate-divider {
             width: 1px;
-            height: 400px;
             border-left: 2px dotted #1a2a4a;
-            margin-top: 86px;
+            align-self: stretch;
+            margin: 24px 0;
         }
         .compatibility-panel {
             padding-top: 86px;
@@ -105,51 +103,10 @@
         .classmate-actions {
             display: grid;
             grid-template-columns: minmax(220px, 290px) minmax(220px, 290px);
-            gap: 224px;
+            gap: 32px;
             margin-top: 48px;
         }
         .classmate-actions .t-open-btn {
-            border-radius: 6px;
-        }
-        .invite-page {
-            min-height: 570px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 46px;
-            color: #111;
-        }
-        .invite-message-card {
-            width: min(100%, 440px);
-            background: #fff;
-            border-radius: 6px;
-            padding: 54px 44px 48px;
-            text-align: center;
-        }
-        .invite-message-card h2 {
-            font-size: 22px;
-            font-weight: 800;
-            margin-bottom: 34px;
-            color: #111;
-        }
-        .invite-message-card p {
-            font-size: 13px;
-            font-weight: 800;
-            color: #111;
-            line-height: 1.7;
-            margin: 0 0 24px;
-        }
-        .invite-message-card .invite-detail {
-            margin-bottom: 0;
-        }
-        .invite-actions {
-            width: min(100%, 720px);
-            display: grid;
-            grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
-            gap: 180px;
-        }
-        .invite-actions .t-open-btn {
             border-radius: 6px;
         }
         .classmate-empty {
@@ -169,9 +126,6 @@
             .classmate-divider { display: none; }
             .compatibility-panel { padding-top: 0; }
             .classmate-actions { grid-template-columns: 1fr; gap: 12px; margin-top: 24px; }
-            .invite-page { min-height: 480px; gap: 28px; }
-            .invite-message-card { padding: 38px 22px; }
-            .invite-actions { grid-template-columns: 1fr; gap: 12px; }
             .profile-section { max-width: 100%; }
         }
     </style>
@@ -199,7 +153,7 @@
 <script src="api.js"></script>
 <script src="student-nav.js"></script>
 <script>
-    let unitId, classmateId, classmate, myTeamId = null, myTeamData = null, unitDetails = null;
+    let unitId, classmateId, classmate;
 
     const splitValues = value => (value || '')
         .split(',')
@@ -268,13 +222,35 @@
         `;
     }
 
-    function renderPage(myPrefs) {
+    function renderTeamSection(teamData) {
+        if (!teamData) {
+            return renderSection('Current Team', ['Not on a team yet']);
+        }
+        const teamName = teamData.team?.team_name || `Team ${teamData.team?.team_number ?? ''}`.trim();
+        const memberNames = (teamData.members || [])
+            .map(m => m.name || m.student_id)
+            .filter(Boolean);
+        const size = (teamData.members || []).length;
+        const max = teamData.maxSize || size;
+        const items = [
+            `${teamName} (${size} / ${max} members)`,
+            ...memberNames.map(n => `• ${n}`)
+        ];
+        return `
+            <div class="profile-section">
+                <div class="profile-section-title">Current Team</div>
+                <ul class="profile-list">
+                    ${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    function renderPage(myPrefs, teamData) {
         const mateTutorials = splitValues(classmate.tutorial_slots || classmate.tutorial_time);
         const mateInterests = splitValues(classmate.project_interests);
         const mateSkills = splitValues(classmate.skills);
         const result = compatibility(myPrefs, classmate);
-        const inviteLabel = myTeamId ? 'Invite to Team' : 'Create Team & Invite';
-        document.getElementById('classmate-card').classList.remove('invite-state');
 
         document.getElementById('classmate-card').innerHTML = `
             <div class="classmate-grid">
@@ -284,108 +260,31 @@
                     ${renderSection('Tutorial Availability', mateTutorials)}
                     ${renderSection('Interests', mateInterests)}
                     ${renderSection('Skills', mateSkills)}
+                    ${renderTeamSection(teamData)}
                 </div>
                 <div class="classmate-divider"></div>
                 ${renderCompatibility(result)}
             </div>
             <div class="classmate-actions">
-                <button class="t-open-btn" onclick="inviteClassmate()">${inviteLabel}</button>
+                ${classmate.team_id
+                    ? `<button class="t-open-btn" onclick="proposeMerge('${classmate.team_id}')">Propose Merge</button>`
+                    : `<button class="t-open-btn" style="background:#aaa;cursor:not-allowed" disabled>No team yet</button>`
+                }
                 <button class="t-open-btn" onclick="window.location='/student-find-teammates.html?unitId=${unitId}'">Close</button>
             </div>
         `;
     }
 
-    function formatDeadline(value) {
-        if (!value) return 'Set by your teacher';
-        const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return value;
-        return date.toLocaleString('en-AU', {
-            weekday: 'long',
-            hour: 'numeric',
-            minute: '2-digit'
-        });
-    }
-
-    function updateHeaderForInvite() {
-        const titleEl = document.getElementById('page-title');
-        if (titleEl) titleEl.textContent = 'Invitation Sent';
-    }
-
-    function renderInvitationPage(options = {}) {
-        updateHeaderForInvite();
-        const name = escapeHtml(classmate?.name || classmate?.student_id || 'This classmate');
-        const teamName = escapeHtml(myTeamData?.team?.team_name || 'your team');
-        const message = options.message || 'Invitation sent!';
-        const status = options.status || 'Waiting for response';
-        const deadline = options.deadline || formatDeadline(unitDetails?.deadline);
-        document.getElementById('classmate-card').classList.add('invite-state');
-
-        document.getElementById('classmate-card').innerHTML = `
-            <div class="invite-page">
-                <section class="invite-message-card" aria-live="polite">
-                    <h2>Invitation Sent</h2>
-                    <p>${name} has been invited to join ${teamName}.</p>
-                    <p class="invite-detail">${escapeHtml(message)}</p>
-                    <p class="invite-detail">Status: ${escapeHtml(status)}</p>
-                    <p class="invite-detail">Response deadline: ${escapeHtml(deadline)}</p>
-                </section>
-                <div class="invite-actions">
-                    <button class="t-open-btn" onclick="window.location='/student-find-teammates.html?unitId=${unitId}'">Continue Finding Teammates</button>
-                    <button class="t-open-btn" onclick="window.location='/student-my-team.html?unitId=${unitId}'">View My Team</button>
-                </div>
-            </div>
-        `;
-    }
-
-    function renderInviteError(message) {
-        updateHeaderForInvite();
-        document.getElementById('classmate-card').classList.add('invite-state');
-        document.getElementById('classmate-card').innerHTML = `
-            <div class="invite-page">
-                <section class="invite-message-card" aria-live="polite">
-                    <h2>Invitation Not Sent</h2>
-                    <p>${escapeHtml(message)}</p>
-                    <p class="invite-detail">Please choose another classmate or check your current team.</p>
-                </section>
-                <div class="invite-actions">
-                    <button class="t-open-btn" onclick="window.location='/student-find-teammates.html?unitId=${unitId}'">Continue Finding Teammates</button>
-                    <button class="t-open-btn" onclick="window.location='/student-my-team.html?unitId=${unitId}'">View My Team</button>
-                </div>
-            </div>
-        `;
-    }
-
-    function getClassmateTeamMembership() {
-        return myTeamData?.members?.find(member => member.student_id === classmateId) || null;
-    }
-
-    async function inviteClassmate() {
-        if (!classmateId) return;
-        if (myTeamId) {
-            await invite(classmateId);
-            return;
-        }
-        await createAndInvite(classmateId);
-    }
-
-    async function invite(toStudentId) {
+    async function proposeMerge(targetTeamId) {
         try {
-            await post(`/api/student/units/${unitId}/teams/${myTeamId}/invite`, { toStudentId });
-            myTeamData = await get(`/api/student/units/${unitId}/my-team`).catch(() => myTeamData);
-            renderInvitationPage({ message: 'Invitation sent!' });
-        } catch(e) { renderInviteError(e.message); }
-    }
-
-    async function createAndInvite(toStudentId) {
-        const teamName = prompt('Enter a team name:', 'My Team');
-        if (!teamName) return;
-        try {
-            const r = await post(`/api/student/units/${unitId}/teams`, { teamName });
-            myTeamId = r.teamId;
-            await post(`/api/student/units/${unitId}/teams/${myTeamId}/invite`, { toStudentId });
-            myTeamData = await get(`/api/student/units/${unitId}/my-team`).catch(() => myTeamData);
-            renderInvitationPage({ message: 'Team created and invitation sent!' });
-        } catch(e) { renderInviteError(e.message); }
+            const r = await post(`/api/student/units/${unitId}/proposals`, { targetTeamId });
+            if (r.state === 'approved') {
+                alert('Merge approved! Your teams are now combined.');
+                window.location = `/student-my-team.html?unitId=${unitId}`;
+            } else {
+                alert('Merge proposal sent. Awaiting votes from both teams.');
+            }
+        } catch (e) { alert(e.message); }
     }
 
     (async () => {
@@ -395,16 +294,11 @@
         if (!nav) return;
         unitId = nav.unitId;
 
-        const [teamData, students, myPrefs, unit] = await Promise.all([
-            get(`/api/student/units/${unitId}/my-team`).catch(() => ({ team: null })),
+        const [students, myPrefs] = await Promise.all([
             get(`/api/student/units/${unitId}/students`),
-            get(`/api/student/units/${unitId}/prefs`).catch(() => null),
-            get(`/api/student/units/${unitId}`).catch(() => null)
+            get(`/api/student/units/${unitId}/prefs`).catch(() => null)
         ]);
 
-        myTeamData = teamData;
-        unitDetails = unit;
-        if (teamData.team) myTeamId = teamData.team.team_id;
         classmate = students.find(s => s.student_id === classmateId);
 
         if (!classmate) {
@@ -415,13 +309,11 @@
             return;
         }
 
-        const classmateMembership = getClassmateTeamMembership();
-        if (classmateMembership?.status === 'WAITING') {
-            renderInvitationPage({ message: 'Invitation sent!' });
-            return;
-        }
+        const teamData = classmate.team_id
+            ? await get(`/api/student/units/${unitId}/teams/${classmate.team_id}`).catch(() => null)
+            : null;
 
-        renderPage(myPrefs);
+        renderPage(myPrefs, teamData);
     })().catch(err => {
         document.getElementById('classmate-card').innerHTML =
             `<div class="classmate-empty">Could not load classmate profile: ${escapeHtml(err.message)}</div>`;

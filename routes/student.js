@@ -135,6 +135,23 @@ router.get('/units/:unitId', (req, res) => {
     res.json(unit);
 });
 
+// ── GET /api/student/units/:unitId/announcements ──────────────
+// All announcements posted by the teacher for this unit, newest first.
+router.get('/units/:unitId/announcements', (req, res) => {
+    const enrolled = get(
+        `SELECT 1 FROM unit_students WHERE unit_id = ? AND student_id = ?`,
+        [req.params.unitId, sid(req)]
+    );
+    if (!enrolled) return res.status(403).json({ error: 'NOT_JOINED' });
+
+    const announcements = all(
+        `SELECT id, title, content, created_at FROM unit_announcements
+          WHERE unit_id = ? ORDER BY id DESC`,
+        [req.params.unitId]
+    );
+    res.json(announcements);
+});
+
 // ── GET /api/student/units/:unitId/progress ───────────────────
 router.get('/units/:unitId/progress', (req, res) => {
     const row = get(
@@ -288,6 +305,32 @@ router.get('/units/:unitId/my-team', (req, res) => {
     };
 
     res.json({ team, members, validation });
+});
+
+// ── GET /api/student/units/:unitId/teams/:teamId ──────────────
+// Read-only view of any team in the unit (name, accepted members, max size).
+// Used by the classmate profile so a student can see what they'd be merging into.
+router.get('/units/:unitId/teams/:teamId', (req, res) => {
+    const team = get(
+        `SELECT team_id, team_name, team_number, status FROM unit_teams
+         WHERE team_id = ? AND unit_id = ?`,
+        [req.params.teamId, req.params.unitId]
+    );
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
+    const members = all(
+        `SELECT tm.student_id, tm.role, tm.status, us.name
+         FROM unit_team_members tm
+         INNER JOIN unit_students us ON us.unit_id = ? AND us.student_id = tm.student_id
+         WHERE tm.team_id = ? AND tm.status = 'ACCEPTED'`,
+        [req.params.unitId, req.params.teamId]
+    );
+
+    const unit = get(`SELECT valid_team_sizes FROM units WHERE unit_id = ?`, [req.params.unitId]);
+    const sizes = (unit?.valid_team_sizes || '4').split(',').map(s => parseInt(s.trim())).filter(Boolean);
+    const maxSize = sizes.length ? Math.max(...sizes) : 4;
+
+    res.json({ team, members, maxSize });
 });
 
 // ── POST /api/student/units/:unitId/proposals ─────────────────

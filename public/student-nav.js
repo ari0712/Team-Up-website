@@ -1,6 +1,7 @@
 const STUDENT_NAV_ITEMS = [
     { key: 'home',           label: 'Home',           href: '/student-home.html',             noUnit: true },
     { key: 'dashboard',      label: 'Dashboard',      href: '/student-dashboard.html' },
+    { key: 'announcements',  label: 'Announcements',  href: '/student-announcements.html' },
     { key: 'rules',          label: 'Rules',          href: '/student-rules.html',            stage: 'read_rules' },
     { key: 'preferences',    label: 'Preferences',    href: '/student-preferences.html',      stage: 'entered_preferences' },
     { key: 'find-teammates', label: 'Find Teammates', href: '/student-find-teammates.html' },
