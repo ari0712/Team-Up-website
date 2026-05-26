@@ -279,15 +279,30 @@ router.put('/:unitId/team-requests/:teamId', requireTeacher, (req, res) => {
         [req.params.unitId, req.session.user.username]);
     if (!unit) return res.status(404).json({ error: 'Unit not found' });
 
-    const newStatus = action === 'approve' ? 'APPROVED' : 'REJECTED';
-    run(`UPDATE unit_teams SET status = ? WHERE team_id = ?`,
-        [newStatus, req.params.teamId]);
+    const newStatus = action === 'approve' ? 'APPROVED' : 'FORMING';
+    if (action === 'approve') {
+        run(`UPDATE unit_teams SET status = ? WHERE team_id = ?`,
+            [newStatus, req.params.teamId]);
+    } else {
+        run(`UPDATE unit_teams SET status = ?, last_rejected_at = ? WHERE team_id = ?`,
+            [newStatus, new Date().toISOString(), req.params.teamId]);
+    }
+
+    const members = all(`SELECT student_id FROM unit_team_members WHERE team_id = ?`,
+        [req.params.teamId]);
 
     if (action === 'approve') {
-        const members = all(`SELECT student_id FROM unit_team_members WHERE team_id = ?`,
-            [req.params.teamId]);
         members.forEach(m => {
             run(`UPDATE student_progress SET teacher_approved = 1 WHERE unit_id = ? AND student_id = ?`,
+                [req.params.unitId, m.student_id]);
+        });
+    } else {
+        // Reject sends the team back to FORMING so members can edit and resubmit.
+        // Clear submitted_request (and teacher_approved, in case of approve→reject)
+        // so the progress UI reflects the team's actual state.
+        members.forEach(m => {
+            run(`UPDATE student_progress SET submitted_request = 0, teacher_approved = 0
+                  WHERE unit_id = ? AND student_id = ?`,
                 [req.params.unitId, m.student_id]);
         });
     }

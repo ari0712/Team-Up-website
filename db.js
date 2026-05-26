@@ -185,6 +185,11 @@ async function initDb() {
   // ── Stable per-unit team number (drives 'Team N' naming) ─────
   try { db.run(`ALTER TABLE unit_teams ADD COLUMN team_number INTEGER DEFAULT 0`); } catch(e) {}
 
+  // Timestamp of the most recent teacher rejection. Drives the "your last
+  // submission was rejected" notice on the my-team page after the team is
+  // bounced back to FORMING.
+  try { db.run(`ALTER TABLE unit_teams ADD COLUMN last_rejected_at TEXT DEFAULT ''`); } catch(e) {}
+
   // ── Teacher-managed tutorial slots per unit ─────────────────────
   db.run(`CREATE TABLE IF NOT EXISTS unit_tutorial_slots (
     slot_id    TEXT PRIMARY KEY,

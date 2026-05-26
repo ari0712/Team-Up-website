@@ -5,6 +5,21 @@
     <title>TeamUp – Create Unit</title>
     <link rel="stylesheet" href="style1.css">
     <link rel="stylesheet" href="teacher-style.css">
+    <style>
+        .t-back-btn {
+            background: #fff;
+            color: #1a2a4a;
+            border: 1.5px solid #d0dff0;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-bottom: 14px;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .t-back-btn:hover { background: #f5f9ff; border-color: #2663ff; color: #2663ff; }
+    </style>
 </head>
 <body class="t-page">
 
@@ -24,6 +39,7 @@
 
 <main class="t-main">
     <div class="t-create-card">
+        <button type="button" class="t-back-btn" onclick="goBack()">← Back</button>
         <h2 class="t-create-title">Create Unit Instance</h2>
 
         <div class="t-field-row">
@@ -192,6 +208,17 @@
     async function doLogout() {
         await post('/api/auth/logout', {});
         window.location = '/';
+    }
+
+    function goBack() {
+        const dirty =
+            document.getElementById('unitName').value.trim() ||
+            document.getElementById('description').value.trim() ||
+            document.getElementById('semester').value.trim() ||
+            document.getElementById('deadline').value ||
+            state.students.length > 0;
+        if (dirty && !confirm('Discard this unit? Your entered details will be lost.')) return;
+        window.location = '/teacher-home.html';
     }
 </script>
 </body>

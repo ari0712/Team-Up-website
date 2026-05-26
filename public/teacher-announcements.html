@@ -225,6 +225,7 @@
             { key: 'team-formation', label: 'Team Formation', href: '/teacher-team-formation.html' },
             { key: 'class-list',     label: 'Class List',     href: '/teacher-class-list.html' },
             { key: 'announcements',  label: 'Announcements',  href: '/teacher-announcements.html' },
+            { key: 'export',         label: 'Export',         href: '/teacher-export.html' },
         ];
         nav.innerHTML = items.map(item => {
             const href = item.noUnit ? item.href : (unitId ? `${item.href}?unitId=${unitId}` : '#');

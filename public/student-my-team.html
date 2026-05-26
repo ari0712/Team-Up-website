@@ -70,6 +70,11 @@
         const { team, members, validation } = teamData;
         const isSubmitted = team.status !== 'FORMING';
         const allGreen = validation.sizeValid && validation.tutorialShared && validation.newToQutOk;
+        const showRejectedNotice = !isSubmitted && !!team.last_rejected_at;
+        const rejectedOn = showRejectedNotice
+            ? new Date(team.last_rejected_at).toLocaleString('en-AU',
+                { day:'numeric', month:'short', year:'numeric', hour:'numeric', minute:'2-digit' })
+            : '';
         const fixes = [];
         if (!validation.sizeValid) {
             const needed = parseInt((team.valid_team_sizes||'4').split(',')[0]) - members.length;
@@ -79,6 +84,11 @@
         if (!validation.newToQutOk) fixes.push(`Maximum ${validation.maxNewToQut} new-to-QUT students allowed.`);
 
         el.innerHTML = `
+      ${showRejectedNotice ? `
+        <div class="s-card" style="border-color:#e94560;background:#fdecee">
+          <p style="font-size:14px;font-weight:800;color:#a8253a;margin-bottom:4px">Your last submission was rejected by your teacher.</p>
+          <p style="font-size:13px;color:#7a3a48;margin:0">Rejected on ${rejectedOn}. Please review your team and re-submit when ready.</p>
+        </div>` : ''}
       <div class="s-card">
         <h3 style="font-size:19px;font-weight:800;margin-bottom:4px">My Team</h3>
         <p style="font-size:13px;color:#666;margin-bottom:16px">Team Name: <strong>${team.team_name}</strong></p>
