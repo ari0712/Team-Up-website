@@ -1,9 +1,9 @@
 # TeamUp Web – Team Formation Platform
 
-Node.js + Express + SQLite web app. Identical features to the JavaFX version.
+Node.js + Express + SQLite web app.
 
 ## Requirements
-- Node.js 18+ (you already have v22)
+- Node.js 18+
 - No other installs needed
 
 ## Setup & Run
@@ -19,7 +19,7 @@ npm start
 http://localhost:3000
 ```
 
-## Features (identical to JavaFX app)
+## Features
 
 | Screen | URL |
 |--------|-----|
@@ -29,6 +29,7 @@ http://localhost:3000
 | Onboarding | `/onboarding.html` |
 | Student Dashboard | `/student.html` |
 | Teacher Dashboard | `/teacher.html` |
+| **More to Come** |
 
 ### Student features
 - Login / Sign Up with SHA-256 password hashing (compatible with existing JavaFX DB)
@@ -56,7 +57,7 @@ teamup-web/
 │   ├── teamRepository.js
 │   └── inviteRepository.js
 ├── services/                 Business logic (direct port of Java services)
-│   ├── authService.js        SHA-256 identical to JavaFX
+│   ├── authService.js        SHA-256 Encryption
 │   ├── studentService.js     filter/sort logic
 │   ├── teamService.js        leave/join/create
 │   └── inviteService.js      send/accept/reject
@@ -78,9 +79,9 @@ teamup-web/
 ```
 
 ## Database
-- Same SQLite schema as JavaFX app
-- File: `teamup.db` in project root (created automatically)
-- SHA-256 password hashes are compatible — existing JavaFX users can log in to the web app
+- SQLite schema
+- File: `teamup.db` in project root
+- SHA-256 password hashes are compatible
 
 ## API Reference
 
