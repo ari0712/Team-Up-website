@@ -69,17 +69,26 @@
         }
         const { team, members, validation } = teamData;
         const isSubmitted = team.status !== 'FORMING';
-        const allGreen = validation.sizeValid && validation.tutorialShared && validation.newToQutOk && validation.allAccepted;
+        const allGreen = validation.sizeValid && validation.tutorialShared && validation.newToQutOk;
+        const showRejectedNotice = !isSubmitted && !!team.last_rejected_at;
+        const rejectedOn = showRejectedNotice
+            ? new Date(team.last_rejected_at).toLocaleString('en-AU',
+                { day:'numeric', month:'short', year:'numeric', hour:'numeric', minute:'2-digit' })
+            : '';
         const fixes = [];
         if (!validation.sizeValid) {
             const needed = parseInt((team.valid_team_sizes||'4').split(',')[0]) - members.length;
-            if (needed > 0) fixes.push(`Invite at least ${needed} more student${needed>1?'s':''}.`);
+            if (needed > 0) fixes.push(`Merge with ${needed} more student${needed>1?'s':''}.`);
         }
-        if (!validation.tutorialShared) fixes.push('All accepted members need a shared tutorial slot.');
+        if (!validation.tutorialShared) fixes.push('All members need a shared tutorial slot.');
         if (!validation.newToQutOk) fixes.push(`Maximum ${validation.maxNewToQut} new-to-QUT students allowed.`);
-        if (!validation.allAccepted) fixes.push('Waiting for invited member to accept.');
 
         el.innerHTML = `
+      ${showRejectedNotice ? `
+        <div class="s-card" style="border-color:#e94560;background:#fdecee">
+          <p style="font-size:14px;font-weight:800;color:#a8253a;margin-bottom:4px">Your last submission was rejected by your teacher.</p>
+          <p style="font-size:13px;color:#7a3a48;margin:0">Rejected on ${rejectedOn}. Please review your team and re-submit when ready.</p>
+        </div>` : ''}
       <div class="s-card">
         <h3 style="font-size:19px;font-weight:800;margin-bottom:4px">My Team</h3>
         <p style="font-size:13px;color:#666;margin-bottom:16px">Team Name: <strong>${team.team_name}</strong></p>
@@ -90,10 +99,7 @@
               <span style="min-width:20px;color:#888">${i+1}.</span>
               <span style="flex:1;font-weight:600">${m.name || m.student_id}</span>
               <span style="flex:1;color:#555">${m.role || '—'}</span>
-              <span class="s-member-status ${m.status.toLowerCase()}">${m.status === 'ACCEPTED' ? 'Accepted' : 'Waiting'}</span>
-              ${m.status === 'WAITING' && team.created_by === myStudentId
-            ? `<button class="t-open-btn" style="font-size:11px;padding:4px 10px;background:#1a2a4a;margin-left:8px"
-                     onclick="removeMember('${m.student_id}')">Find Replacement</button>` : ''}
+              <span class="s-member-status accepted">Accepted</span>
             </div>`).join('')}
         </div>
       </div>
@@ -102,7 +108,6 @@
         <div class="s-val-row"><div class="s-val-dot" style="background:${validation.sizeValid?'#22c55e':'#e94560'}"></div> Team has ${members.length} student${members.length!==1?'s':''}</div>
         <div class="s-val-row"><div class="s-val-dot" style="background:${validation.tutorialShared?'#22c55e':'#e94560'}"></div> ${validation.tutorialShared ? `Members share ${validation.sharedTutorials[0]}` : 'No shared tutorial slot found'}</div>
         <div class="s-val-row"><div class="s-val-dot" style="background:${validation.newToQutOk?'#22c55e':'#e94560'}"></div> New-to-QUT students: ${validation.newToQutCount} / ${validation.maxNewToQut}</div>
-        <div class="s-val-row"><div class="s-val-dot" style="background:${validation.allAccepted?'#22c55e':'#e94560'}"></div> ${validation.allAccepted ? 'All members accepted' : 'Waiting for invited member to accept'}</div>
       </div>
       ${!isSubmitted && !allGreen && fixes.length ? `
         <p class="s-fix-text">This team cannot be submitted yet.</p>
@@ -112,14 +117,8 @@
         ${!isSubmitted ? `<button class="t-open-btn" style="width:220px;${!allGreen?'background:#aaa;cursor:not-allowed':''}"
             ${!allGreen?'disabled':''} onclick="submitTeam()">Submit Team Request</button>` : ''}
         ${isSubmitted ? `<button class="t-open-btn" style="width:220px;background:#1a2a4a" onclick="window.location='/student-status.html?unitId=${unitId}'">View Status</button>` : ''}
-        ${!isSubmitted ? `<button class="t-open-btn" style="width:180px;background:#e94560" onclick="confirmCancel()">Cancel Request</button>` : ''}
+        ${!isSubmitted ? `<button class="t-open-btn" style="width:180px;background:#e94560" onclick="leaveTeam()">Leave Team</button>` : ''}
       </div>`;
-    }
-
-    async function removeMember(studentId) {
-        if (!confirm('Remove this member from the team?')) return;
-        await fetch(`/api/student/units/${unitId}/teams/${teamData.team.team_id}/members/${studentId}`, { method:'DELETE' });
-        await loadTeam();
     }
 
     async function submitTeam() {
@@ -130,10 +129,12 @@
         } catch(e) { alert(e.message); }
     }
 
-    function confirmCancel() {
-        if (confirm('Are you sure you want to cancel your team request? This cannot be undone.')) {
-            alert('Cancel flow coming soon.');
-        }
+    async function leaveTeam() {
+        if (!confirm('Are you sure you want to leave this team?')) return;
+        try {
+            await fetch(`/api/student/units/${unitId}/teams/${teamData.team.team_id}/leave`, { method: 'DELETE' });
+            window.location = `/student-dashboard.html?unitId=${unitId}`;
+        } catch(e) { alert(e.message); }
     }
 </script>
 </body>

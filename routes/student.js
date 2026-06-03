@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const { all, get, run } = require('../db');
 const { requireStudent } = require('../middleware/auth');
+const proposalService = require('../services/proposalService');
 const crypto = require('crypto');
 
 // Apply requireStudent to ALL routes in this file
@@ -9,6 +10,46 @@ router.use(requireStudent);
 
 // Helper: get the calling student's ID
 const sid = req => req.session.user.username;
+
+// Create a team-of-1 for a student in a unit. Used by:
+//   - POST /units/:unitId/join (eager creation on enrollment)
+//   - DELETE /units/:unitId/teams/:teamId/leave (move leaver to a fresh team)
+//   - DELETE /units/:unitId/teams/:teamId/members/:studentId (kicked → fresh team)
+function createTeamOfOne(unitId, studentId) {
+    const prefs = get(
+        `SELECT preferred_role FROM student_unit_prefs WHERE unit_id = ? AND student_id = ?`,
+        [unitId, studentId]
+    );
+    const role = prefs?.preferred_role || '';
+    const maxRow = get(
+        `SELECT MAX(team_number) AS m FROM unit_teams WHERE unit_id = ?`,
+        [unitId]
+    );
+    const teamNumber = (maxRow?.m || 0) + 1;
+    const teamId = crypto.randomUUID();
+    run(
+        `INSERT INTO unit_teams (team_id, unit_id, team_name, team_number, created_by, status)
+         VALUES (?,?,?,?,?, 'FORMING')`,
+        [teamId, unitId, `Team ${teamNumber}`, teamNumber, studentId]
+    );
+    run(
+        `INSERT INTO unit_team_members (team_id, student_id, role, status)
+         VALUES (?,?,?, 'ACCEPTED')`,
+        [teamId, studentId, role]
+    );
+    run(
+        `UPDATE student_progress SET in_team = 1 WHERE unit_id = ? AND student_id = ?`,
+        [unitId, studentId]
+    );
+    return teamId;
+}
+
+// Translate ServiceError thrown by proposalService into an HTTP response.
+function handleServiceError(res, e) {
+    if (e && e.status) return res.status(e.status).json({ error: e.message });
+    console.error('Unexpected proposal service error:', e);
+    return res.status(500).json({ error: 'Internal error' });
+}
 
 // ── GET /api/student/units ─────────────────────────────────────
 // List units the logged-in student is enrolled in
@@ -73,6 +114,9 @@ router.post('/units/:unitId/join', (req, res) => {
         [req.params.unitId, sid(req)]
     );
 
+    // Eager team-of-1 so every enrolled student is always on a team.
+    createTeamOfOne(req.params.unitId, sid(req));
+
     res.json({ ok: true, alreadyJoined: false });
 });
 
@@ -89,6 +133,23 @@ router.get('/units/:unitId', (req, res) => {
     const unit = get(`SELECT * FROM units WHERE unit_id = ?`, [req.params.unitId]);
     if (!unit) return res.status(404).json({ error: 'Unit not found' });
     res.json(unit);
+});
+
+// ── GET /api/student/units/:unitId/announcements ──────────────
+// All announcements posted by the teacher for this unit, newest first.
+router.get('/units/:unitId/announcements', (req, res) => {
+    const enrolled = get(
+        `SELECT 1 FROM unit_students WHERE unit_id = ? AND student_id = ?`,
+        [req.params.unitId, sid(req)]
+    );
+    if (!enrolled) return res.status(403).json({ error: 'NOT_JOINED' });
+
+    const announcements = all(
+        `SELECT id, title, content, created_at FROM unit_announcements
+          WHERE unit_id = ? ORDER BY id DESC`,
+        [req.params.unitId]
+    );
+    res.json(announcements);
 });
 
 // ── GET /api/student/units/:unitId/progress ───────────────────
@@ -115,6 +176,16 @@ router.put('/units/:unitId/progress', (req, res) => {
         [value ? 1 : 0, req.params.unitId, sid(req)]
     );
     res.json({ ok: true });
+});
+
+// ── GET /api/student/units/:unitId/tutorial-slots ─────────────
+router.get('/units/:unitId/tutorial-slots', (req, res) => {
+    const slots = all(
+        `SELECT slot_id, label, sort_order FROM unit_tutorial_slots
+          WHERE unit_id = ? ORDER BY sort_order, label`,
+        [req.params.unitId]
+    );
+    res.json(slots);
 });
 
 // ── GET /api/student/units/:unitId/prefs ──────────────────────
@@ -166,7 +237,11 @@ router.get('/units/:unitId/students', (req, res) => {
     const { search, tutorial, interest, skill } = req.query;
     let students = all(
         `SELECT us.student_id, us.name, us.tutorial_time, us.is_new_to_qut,
-                sup.tutorial_slots, sup.project_interests, sup.skills, sup.preferred_role
+                sup.tutorial_slots, sup.project_interests, sup.skills, sup.preferred_role,
+                (SELECT tm.team_id FROM unit_team_members tm
+                   INNER JOIN unit_teams t ON t.team_id = tm.team_id
+                  WHERE tm.student_id = us.student_id AND t.unit_id = us.unit_id
+                  LIMIT 1) AS team_id
          FROM unit_students us
          LEFT JOIN student_unit_prefs sup ON sup.unit_id = us.unit_id AND sup.student_id = us.student_id
          WHERE us.unit_id = ? AND us.student_id != ?`,
@@ -219,13 +294,11 @@ router.get('/units/:unitId/my-team', (req, res) => {
     }
 
     const newToQutCount = members.filter(m => m.is_new_to_qut == 1).length;
-    const allAccepted = members.every(m => m.status === 'ACCEPTED');
 
     const validation = {
         sizeValid:       validSizes.includes(members.length),
         tutorialShared:  sharedTutorial && sharedTutorial.length > 0,
         newToQutOk:      newToQutCount <= (unit.max_new_to_qut || 2),
-        allAccepted:     allAccepted,
         sharedTutorials: sharedTutorial || [],
         newToQutCount,
         maxNewToQut:     unit.max_new_to_qut || 2
@@ -234,135 +307,156 @@ router.get('/units/:unitId/my-team', (req, res) => {
     res.json({ team, members, validation });
 });
 
-// ── POST /api/student/units/:unitId/teams ─────────────────────
-// Create a new team. Body: { teamName }
-router.post('/units/:unitId/teams', (req, res) => {
-    // Check student isn't already in a team
-    const existing = get(
+// ── GET /api/student/units/:unitId/teams/:teamId ──────────────
+// Read-only view of any team in the unit (name, accepted members, max size).
+// Used by the classmate profile so a student can see what they'd be merging into.
+router.get('/units/:unitId/teams/:teamId', (req, res) => {
+    const team = get(
+        `SELECT team_id, team_name, team_number, status FROM unit_teams
+         WHERE team_id = ? AND unit_id = ?`,
+        [req.params.teamId, req.params.unitId]
+    );
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
+    const members = all(
+        `SELECT tm.student_id, tm.role, tm.status, us.name
+         FROM unit_team_members tm
+         INNER JOIN unit_students us ON us.unit_id = ? AND us.student_id = tm.student_id
+         WHERE tm.team_id = ? AND tm.status = 'ACCEPTED'`,
+        [req.params.unitId, req.params.teamId]
+    );
+
+    const unit = get(`SELECT valid_team_sizes FROM units WHERE unit_id = ?`, [req.params.unitId]);
+    const sizes = (unit?.valid_team_sizes || '4').split(',').map(s => parseInt(s.trim())).filter(Boolean);
+    const maxSize = sizes.length ? Math.max(...sizes) : 4;
+
+    res.json({ team, members, maxSize });
+});
+
+// ── POST /api/student/units/:unitId/proposals ─────────────────
+// Body: { targetTeamId }. Source team is the caller's team in this unit.
+router.post('/units/:unitId/proposals', (req, res) => {
+    const { targetTeamId } = req.body || {};
+    const callerTeam = get(
         `SELECT tm.team_id FROM unit_team_members tm
          INNER JOIN unit_teams t ON t.team_id = tm.team_id
          WHERE t.unit_id = ? AND tm.student_id = ?`,
         [req.params.unitId, sid(req)]
     );
-    if (existing) return res.status(409).json({ error: 'You are already in a team for this unit' });
+    if (!callerTeam) return res.status(400).json({ error: 'You are not on a team in this unit' });
 
-    const teamId = crypto.randomUUID();
-    run(
-        `INSERT INTO unit_teams (team_id, unit_id, team_name, created_by) VALUES (?,?,?,?)`,
-        [teamId, req.params.unitId, (req.body.teamName || 'My Team').trim(), sid(req)]
-    );
-    // Get the student's preferred role from their prefs
-    const prefs = get(
-        `SELECT preferred_role FROM student_unit_prefs WHERE unit_id = ? AND student_id = ?`,
-        [req.params.unitId, sid(req)]
-    );
-    run(
-        `INSERT INTO unit_team_members (team_id, student_id, role, status) VALUES (?,?,?,?)`,
-        [teamId, sid(req), prefs ? prefs.preferred_role : '', 'ACCEPTED']
-    );
-    run(
-        `UPDATE student_progress SET in_team = 1 WHERE unit_id = ? AND student_id = ?`,
-        [req.params.unitId, sid(req)]
-    );
-    res.json({ ok: true, teamId });
+    try {
+        const result = proposalService.createProposal({
+            unitId: req.params.unitId,
+            sourceTeamId: callerTeam.team_id,
+            targetTeamId,
+            initiatorId: sid(req),
+        });
+        res.json({ proposalId: result.proposalId, state: result.state });
+    } catch (e) { handleServiceError(res, e); }
 });
 
-// ── POST /api/student/units/:unitId/teams/:teamId/invite ──────
-// Body: { toStudentId }
-router.post('/units/:unitId/teams/:teamId/invite', (req, res) => {
-    const { toStudentId } = req.body;
-    if (!toStudentId) return res.status(400).json({ error: 'toStudentId required' });
-
-    // Verify caller is in this team
-    const membership = get(
-        `SELECT 1 FROM unit_team_members WHERE team_id = ? AND student_id = ?`,
-        [req.params.teamId, sid(req)]
-    );
-    if (!membership) return res.status(403).json({ error: 'You are not in this team' });
-
-    // Check target isn't already in a team
-    const alreadyIn = get(
-        `SELECT 1 FROM unit_team_members tm
-         INNER JOIN unit_teams t ON t.team_id = tm.team_id
-         WHERE t.unit_id = ? AND tm.student_id = ?`,
-        [req.params.unitId, toStudentId]
-    );
-    if (alreadyIn) return res.status(409).json({ error: 'That student is already in a team' });
-
-    const inviteId = crypto.randomUUID();
-    run(
-        `INSERT INTO unit_team_invites (invite_id, unit_id, team_id, from_student, to_student, sent_at)
-         VALUES (?,?,?,?,?,?)`,
-        [inviteId, req.params.unitId, req.params.teamId, sid(req), toStudentId, new Date().toISOString()]
-    );
-    // Add member row as WAITING
-    const prefs = get(
-        `SELECT preferred_role FROM student_unit_prefs WHERE unit_id = ? AND student_id = ?`,
-        [req.params.unitId, toStudentId]
-    );
-    run(
-        `INSERT OR IGNORE INTO unit_team_members (team_id, student_id, role, status) VALUES (?,?,?,?)`,
-        [req.params.teamId, toStudentId, prefs ? prefs.preferred_role : '', 'WAITING']
-    );
-    res.json({ ok: true, inviteId });
+// ── GET /api/student/units/:unitId/proposals ──────────────────
+router.get('/units/:unitId/proposals', (req, res) => {
+    try {
+        res.json(proposalService.listProposalsForStudent(req.params.unitId, sid(req)));
+    } catch (e) { handleServiceError(res, e); }
 });
 
-// ── GET /api/student/units/:unitId/invites ────────────────────
-// Pending invites for the logged-in student
-router.get('/units/:unitId/invites', (req, res) => {
-    const invites = all(
-        `SELECT i.*, t.team_name, us.name as from_name
-         FROM unit_team_invites i
-         INNER JOIN unit_teams t ON t.team_id = i.team_id
-         INNER JOIN unit_students us ON us.unit_id = i.unit_id AND us.student_id = i.from_student
-         WHERE i.unit_id = ? AND i.to_student = ? AND i.status = 'PENDING'`,
-        [req.params.unitId, sid(req)]
-    );
-    res.json(invites);
+// ── GET /api/student/units/:unitId/proposals/:id ──────────────
+router.get('/units/:unitId/proposals/:id', (req, res) => {
+    try {
+        res.json(proposalService.getProposalDetail(req.params.unitId, req.params.id, sid(req)));
+    } catch (e) { handleServiceError(res, e); }
 });
 
-// ── PUT /api/student/units/:unitId/invites/:inviteId ──────────
-// Body: { action: 'accept' | 'decline' }
-router.put('/units/:unitId/invites/:inviteId', (req, res) => {
-    const { action } = req.body;
-    if (!['accept','decline'].includes(action))
-        return res.status(400).json({ error: 'action must be accept or decline' });
+// ── PATCH /api/student/units/:unitId/proposals/:id/vote ───────
+// Body: { vote: 'yes' | 'no' }
+router.patch('/units/:unitId/proposals/:id/vote', (req, res) => {
+    try {
+        const result = proposalService.castVote({
+            proposalId: req.params.id,
+            studentId: sid(req),
+            vote: (req.body || {}).vote,
+        });
+        res.json(result);
+    } catch (e) { handleServiceError(res, e); }
+});
 
-    const invite = get(
-        `SELECT * FROM unit_team_invites WHERE invite_id = ? AND to_student = ?`,
-        [req.params.inviteId, sid(req)]
-    );
-    if (!invite) return res.status(404).json({ error: 'Invite not found' });
-
-    run(`UPDATE unit_team_invites SET status = ? WHERE invite_id = ?`,
-        [action === 'accept' ? 'ACCEPTED' : 'DECLINED', req.params.inviteId]);
-
-    if (action === 'accept') {
-        run(`UPDATE unit_team_members SET status = 'ACCEPTED' WHERE team_id = ? AND student_id = ?`,
-            [invite.team_id, sid(req)]);
-        run(`UPDATE student_progress SET in_team = 1 WHERE unit_id = ? AND student_id = ?`,
-            [req.params.unitId, sid(req)]);
-    } else {
-        run(`DELETE FROM unit_team_members WHERE team_id = ? AND student_id = ?`,
-            [invite.team_id, sid(req)]);
-    }
-    res.json({ ok: true });
+// ── PATCH /api/student/units/:unitId/proposals/:id/seen ───────
+router.patch('/units/:unitId/proposals/:id/seen', (req, res) => {
+    try {
+        proposalService.markSeen({ proposalId: req.params.id, studentId: sid(req) });
+        res.json({ ok: true });
+    } catch (e) { handleServiceError(res, e); }
 });
 
 // ── DELETE /api/student/units/:unitId/teams/:teamId/members/:studentId ──
+// Team creator kicks a teammate. Kicked student is moved to a fresh team-of-1
+// (we keep the "every student is a team" invariant) and any open proposal
+// they're part of is invalidated.
 router.delete('/units/:unitId/teams/:teamId/members/:studentId', (req, res) => {
-    // Only team creator can remove members
     const team = get(`SELECT * FROM unit_teams WHERE team_id = ? AND created_by = ?`,
         [req.params.teamId, sid(req)]);
     if (!team) return res.status(403).json({ error: 'Only the team creator can remove members' });
+    if (team.status !== 'FORMING')
+        return res.status(400).json({ error: 'Cannot modify a submitted team' });
 
+    const kicked = req.params.studentId;
+    if (kicked === sid(req))
+        return res.status(400).json({ error: 'Use the leave endpoint to remove yourself' });
+
+    const membership = get(
+        `SELECT 1 AS ok FROM unit_team_members WHERE team_id = ? AND student_id = ?`,
+        [req.params.teamId, kicked]
+    );
+    if (!membership) return res.status(404).json({ error: 'Member not on this team' });
+
+    proposalService.invalidateProposalsForStudent(kicked);
     run(`DELETE FROM unit_team_members WHERE team_id = ? AND student_id = ?`,
-        [req.params.teamId, req.params.studentId]);
-    run(`UPDATE student_progress SET in_team = 0 WHERE unit_id = ? AND student_id = ?`,
-        [req.params.unitId, req.params.studentId]);
-    // Cancel any pending invites for them
-    run(`UPDATE unit_team_invites SET status = 'DECLINED' WHERE team_id = ? AND to_student = ?`,
-        [req.params.teamId, req.params.studentId]);
+        [req.params.teamId, kicked]);
+    createTeamOfOne(req.params.unitId, kicked);
+
+    res.json({ ok: true });
+});
+
+// ── DELETE /api/student/units/:unitId/teams/:teamId/leave ──────
+// Caller leaves a multi-member team. They get moved to a fresh team-of-1
+// (every student is always on a team). Open proposals they participate in
+// are invalidated. A team-of-1 has no one to leave from → 400.
+router.delete('/units/:unitId/teams/:teamId/leave', (req, res) => {
+    const studentId = sid(req);
+    const team = get(`SELECT * FROM unit_teams WHERE team_id = ? AND unit_id = ?`,
+        [req.params.teamId, req.params.unitId]);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+    if (team.status !== 'FORMING')
+        return res.status(400).json({ error: 'Cannot leave a submitted team' });
+
+    const membership = get(`SELECT * FROM unit_team_members WHERE team_id = ? AND student_id = ?`,
+        [req.params.teamId, studentId]);
+    if (!membership) return res.status(400).json({ error: 'You are not in this team' });
+
+    const memberCount = all(`SELECT 1 FROM unit_team_members WHERE team_id = ?`,
+        [req.params.teamId]).length;
+    if (memberCount <= 1)
+        return res.status(400).json({ error: 'You are not in a team with anyone to leave' });
+
+    proposalService.invalidateProposalsForStudent(studentId);
+    run(`DELETE FROM unit_team_members WHERE team_id = ? AND student_id = ?`,
+        [req.params.teamId, studentId]);
+
+    // If the leaver was the creator, transfer ownership of the surviving team.
+    if (team.created_by === studentId) {
+        const remaining = all(`SELECT * FROM unit_team_members WHERE team_id = ?`,
+            [req.params.teamId]);
+        const newOwner = remaining.find(m => m.status === 'ACCEPTED') || remaining[0];
+        if (newOwner) {
+            run(`UPDATE unit_teams SET created_by = ? WHERE team_id = ?`,
+                [newOwner.student_id, req.params.teamId]);
+        }
+    }
+
+    createTeamOfOne(req.params.unitId, studentId);
     res.json({ ok: true });
 });
 
@@ -375,8 +469,6 @@ router.post('/units/:unitId/teams/:teamId/submit', (req, res) => {
         return res.status(400).json({ error: 'Team has already been submitted' });
 
     const members = all(`SELECT * FROM unit_team_members WHERE team_id = ?`, [req.params.teamId]);
-    if (members.some(m => m.status === 'WAITING'))
-        return res.status(400).json({ error: 'All members must accept before submitting' });
 
     run(`UPDATE unit_teams SET status = 'SUBMITTED', submitted_at = ? WHERE team_id = ?`,
         [new Date().toISOString(), req.params.teamId]);
@@ -385,6 +477,19 @@ router.post('/units/:unitId/teams/:teamId/submit', (req, res) => {
         run(`UPDATE student_progress SET submitted_request = 1 WHERE unit_id = ? AND student_id = ?`,
             [req.params.unitId, m.student_id]);
     });
+
+    // Submitting locks the team — any in-flight proposal involving it must be
+    // invalidated. resolveProposal sees the non-FORMING state and flips it.
+    const inflight = all(
+        `SELECT proposal_id FROM proposals
+          WHERE state = 'open' AND (source_team_id = ? OR target_team_id = ?)`,
+        [req.params.teamId, req.params.teamId]
+    );
+    for (const p of inflight) {
+        try { proposalService.resolveProposal(p.proposal_id); }
+        catch (e) { console.error('Submit-time proposal resolve failed:', e.message); }
+    }
+
     res.json({ ok: true });
 });
 

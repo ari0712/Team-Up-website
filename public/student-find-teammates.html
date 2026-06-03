@@ -38,9 +38,6 @@
             <input id="search" type="text" placeholder="Search by name or student ID…" oninput="filterStudents()">
             <select id="filter-tutorial" onchange="filterStudents()">
                 <option value="">Any tutorial</option>
-                <option>Monday 10:00 AM</option><option>Monday 2:00 PM</option>
-                <option>Tuesday 9:00 AM</option><option>Wednesday 1:00 PM</option>
-                <option>Thursday 11:00 AM</option><option>Friday 10:00 AM</option>
             </select>
             <select id="filter-interest" onchange="filterStudents()">
                 <option value="">Any interest</option>
@@ -66,17 +63,25 @@
 <script src="api.js"></script>
 <script src="student-nav.js"></script>
 <script>
-    let allStudents = [], myTeamId = null, unitId;
+    let allStudents = [], unitId;
 
     (async () => {
         const nav = await initStudentNav({ activeItem:'find-teammates', pageTitle:'Find Teammates' });
         if (!nav) return;
         unitId = nav.unitId;
 
-        // Get my team id if I have one
-        const teamData = await get(`/api/student/units/${unitId}/my-team`).catch(() => ({team:null}));
-        if (teamData.team) myTeamId = teamData.team.team_id;
+        // Populate the tutorial-time filter from the teacher's slot list.
+        try {
+            const slots = await get(`/api/student/units/${unitId}/tutorial-slots`);
+            const sel = document.getElementById('filter-tutorial');
+            slots.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.label; opt.textContent = s.label;
+                sel.appendChild(opt);
+            });
+        } catch(e) { console.error('Could not load tutorial slots:', e); }
 
+        // Every enrolled student is on a team-of-1, so we don't need to fetch it here.
         allStudents = await get(`/api/student/units/${unitId}/students`);
         renderStudents(allStudents);
     })();
@@ -113,10 +118,10 @@
           </div>
           <div class="s-invite-row">
             <button class="t-open-btn" style="width:140px;background:#fff;color:#2663ff;border:1.5px solid #2663ff"
-              onclick="viewProfile('${s.student_id}','${(s.name||s.student_id).replace(/'/g,"\\'")}','${s.preferred_role||''}','${tutorial}','${interests.join(';')}','${skills.join(';')}')">View Profile</button>
-            ${myTeamId
-                ? `<button class="t-open-btn" style="width:140px" onclick="invite('${s.student_id}')">Invite to Team</button>`
-                : `<button class="t-open-btn" style="width:140px;background:#1a2a4a" onclick="createAndInvite('${s.student_id}')">Create Team &amp; Invite</button>`
+              onclick="viewProfile('${s.student_id}')">View Profile</button>
+            ${s.team_id
+                ? `<button class="t-open-btn" style="width:140px" onclick="proposeMerge('${s.team_id}')">Propose Merge</button>`
+                : `<button class="t-open-btn" style="width:140px;background:#aaa;cursor:not-allowed" disabled>No team yet</button>`
             }
           </div>
         </div>
@@ -124,26 +129,20 @@
         }).join('');
     }
 
-    async function invite(toStudentId) {
+    async function proposeMerge(targetTeamId) {
         try {
-            await post(`/api/student/units/${unitId}/teams/${myTeamId}/invite`, { toStudentId });
-            alert('Invitation sent!');
+            const r = await post(`/api/student/units/${unitId}/proposals`, { targetTeamId });
+            if (r.state === 'approved') {
+                alert('Merge approved! Your teams are now combined.');
+                window.location = `/student-my-team.html?unitId=${unitId}`;
+            } else {
+                alert('Merge proposal sent. Awaiting votes from both teams.');
+            }
         } catch(e) { alert(e.message); }
     }
 
-    async function createAndInvite(toStudentId) {
-        const teamName = prompt('Enter a team name:', 'My Team');
-        if (!teamName) return;
-        try {
-            const r = await post(`/api/student/units/${unitId}/teams`, { teamName });
-            myTeamId = r.teamId;
-            await post(`/api/student/units/${unitId}/teams/${myTeamId}/invite`, { toStudentId });
-            alert('Team created and invitation sent!');
-        } catch(e) { alert(e.message); }
-    }
-
-    function viewProfile(id, name, role, tutorial, interests, skills) {
-        alert(`${name}\nID: ${id}\nRole: ${role || 'Not set'}\nTutorial: ${tutorial || 'Not set'}\nInterests: ${interests.replace(/;/g,', ')||'None'}\nSkills: ${skills.replace(/;/g,', ')||'None'}`);
+    function viewProfile(id) {
+        window.location = `/student-classmate-profile.html?unitId=${unitId}&studentId=${encodeURIComponent(id)}`;
     }
 </script>
 </body>

@@ -53,19 +53,11 @@ function statusBadge(status) {
   return `<span class="badge ${map[status] || 'badge-muted'}">${status}</span>`;
 }
 
-// Tutorial slots constant
-const TUTORIAL_SLOTS = [
-  'Monday 10am','Monday 12pm','Monday 2pm',
-  'Tuesday 10am','Tuesday 12pm','Tuesday 2pm',
-  'Wednesday 10am','Wednesday 12pm','Wednesday 2pm',
-  'Thursday 10am','Thursday 12pm','Thursday 2pm',
-  'Friday 10am','Friday 12pm','Friday 2pm'
-];
-
-// Build multi-select list HTML
-function buildTutorialList(selectedSlots = []) {
+// Build multi-select list HTML. Caller passes the slot labels for the unit
+// (teacher-managed via /api/units/:unitId/tutorial-slots).
+function buildTutorialList(selectedSlots = [], allSlots = []) {
   const sel = typeof selectedSlots === 'string' ? selectedSlots.split(',').map(s => s.trim()) : selectedSlots;
-  return TUTORIAL_SLOTS.map(slot =>
+  return allSlots.map(slot =>
     `<div class="list-item ${sel.includes(slot) ? 'selected' : ''}" data-slot="${slot}">${slot}</div>`
   ).join('');
 }

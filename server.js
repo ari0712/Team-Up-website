@@ -31,6 +31,13 @@ app.get('*', (req, res) => {
 
 initDb().then(() => {
   app.listen(PORT, () => console.log(`TeamUp running at http://localhost:${PORT}`));
+
+  // Periodic sweep: resolve any open proposals whose expires_at has passed.
+  const { sweepExpired } = require('./services/proposalService');
+  setInterval(() => {
+    try { sweepExpired(); }
+    catch (e) { console.error('Proposal sweep failed:', e); }
+  }, 60 * 1000);
 }).catch(err => {
   console.error('Failed to init database:', err);
   process.exit(1);

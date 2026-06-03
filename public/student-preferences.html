@@ -94,16 +94,18 @@
         if (!nav) return;
         unitId = nav.unitId;
 
-        // Build tutorial slots from unit data
+        // Tutorial slots come from the teacher-managed list for this unit.
         const unit = await requireUnitAccess(unitId);
         if (!unit) return;
-        // Get unique tutorial times from this unit's student list for the current student
-        const myInfo = await get(`/api/student/units/${unitId}`);
-        // Use predefined common slots — in a real build, derive from unit_students tutorial_time values
-        const slots = ['Monday 10:00 AM','Monday 2:00 PM','Tuesday 9:00 AM','Wednesday 1:00 PM','Thursday 11:00 AM','Friday 10:00 AM'];
-        document.getElementById('tutorial-slots').innerHTML = slots.map(s =>
-            `<label><input type="checkbox" name="tutorial" value="${s}"> ${s}</label>`
-        ).join('');
+        const slots = await get(`/api/student/units/${unitId}/tutorial-slots`);
+        const slotContainer = document.getElementById('tutorial-slots');
+        if (!slots.length) {
+            slotContainer.innerHTML = '<p style="color:#888;font-size:13px">Your teacher hasn’t added any tutorial slots yet.</p>';
+        } else {
+            slotContainer.innerHTML = slots.map(s =>
+                `<label><input type="checkbox" name="tutorial" value="${s.label}"> ${s.label}</label>`
+            ).join('');
+        }
 
         // Load existing prefs
         const prefs = await get(`/api/student/units/${unitId}/prefs`);

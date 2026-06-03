@@ -1,12 +1,14 @@
 const STUDENT_NAV_ITEMS = [
     { key: 'home',           label: 'Home',           href: '/student-home.html',             noUnit: true },
     { key: 'dashboard',      label: 'Dashboard',      href: '/student-dashboard.html' },
+    { key: 'announcements',  label: 'Announcements',  href: '/student-announcements.html' },
     { key: 'rules',          label: 'Rules',          href: '/student-rules.html',            stage: 'read_rules' },
     { key: 'preferences',    label: 'Preferences',    href: '/student-preferences.html',      stage: 'entered_preferences' },
     { key: 'find-teammates', label: 'Find Teammates', href: '/student-find-teammates.html' },
     { key: 'my-team',        label: 'My Team',        href: '/student-my-team.html',          stage: 'in_team' },
     { key: 'status',         label: 'Status',         href: '/student-status.html',           stage: 'submitted_request' },
     { key: 'final-team',     label: 'Final Team',     href: '/student-final-team.html',       stage: 'teacher_approved' },
+    { key: 'profile',        label: 'Your Profile',   href: '/student-profile.html' },
 ];
 
 async function initStudentNav({ activeItem, pageTitle }) {

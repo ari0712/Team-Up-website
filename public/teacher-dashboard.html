@@ -48,6 +48,7 @@
                 <span class="t-badge-ruleset">Group Rule Set</span>
                 <ul class="t-rules-list" id="rulesList"></ul>
                 <button class="t-edit-rules-btn" id="editRulesBtn">Edit Rule Set</button>
+                <button class="t-edit-rules-btn" id="manageSlotsBtn" style="margin-top:8px">Manage Tutorial Slots</button>
             </div>
         </div>
 
@@ -114,6 +115,7 @@
 
             document.getElementById('rulesList').innerHTML = rules.map(r => `<li>✓ ${r}</li>`).join('');
             document.getElementById('editRulesBtn').onclick = () => openEditRules(u);
+            document.getElementById('manageSlotsBtn').onclick = openSlotManager;
 
         } catch(e) { console.error('loadUnit:', e); }
     }
@@ -157,6 +159,7 @@
             { key: 'team-formation',  label: 'Team Formation', href: '/teacher-team-formation.html' },
             { key: 'class-list',      label: 'Class List',     href: '/teacher-class-list.html' },
             { key: 'announcements',   label: 'Announcements',  href: '/teacher-announcements.html' },
+            { key: 'export',          label: 'Export',         href: '/teacher-export.html' },
         ];
         nav.innerHTML = items.map(item => {
             const href = item.noUnit ? item.href : (unitId ? `${item.href}?unitId=${unitId}` : '#');
@@ -208,6 +211,70 @@
             document.getElementById('er-save-msg').textContent = e.message;
         }
     }
+
+    // ── Tutorial-slot manager ─────────────────────────────────
+    async function openSlotManager() {
+        document.getElementById('slotMsg').textContent = '';
+        document.getElementById('slotMsg').style.color = '#e94560';
+        document.getElementById('newSlotLabel').value = '';
+        await renderSlotList();
+        document.getElementById('manageSlotsModal').classList.add('open');
+    }
+    function closeSlotManager() {
+        document.getElementById('manageSlotsModal').classList.remove('open');
+    }
+    async function renderSlotList() {
+        const slots = await get(`/api/units/${unitId}/tutorial-slots`);
+        const list = document.getElementById('slotList');
+        if (!slots.length) {
+            list.innerHTML = '<p style="color:#888;font-size:13px;margin:6px 0">No tutorial slots yet. Add the first one below.</p>';
+            return;
+        }
+        list.innerHTML = slots.map(s => `
+            <div class="slot-row" style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+              <input type="text" value="${s.label.replace(/"/g, '&quot;')}" data-slot-id="${s.slot_id}" style="flex:1">
+              <button onclick="renameSlot('${s.slot_id}')" style="padding:4px 10px">Rename</button>
+              <button onclick="deleteSlot('${s.slot_id}','${s.label.replace(/'/g, "\\'")}')" style="padding:4px 10px;background:#e94560;color:#fff;border:none;border-radius:6px;cursor:pointer">Delete</button>
+            </div>
+        `).join('');
+    }
+    async function addSlot() {
+        const input = document.getElementById('newSlotLabel');
+        const label = input.value.trim();
+        if (!label) return;
+        try {
+            await post(`/api/units/${unitId}/tutorial-slots`, { label });
+            input.value = '';
+            document.getElementById('slotMsg').textContent = '';
+            await renderSlotList();
+        } catch(e) { document.getElementById('slotMsg').textContent = e.message; }
+    }
+    async function renameSlot(slotId) {
+        const input = document.querySelector(`input[data-slot-id="${slotId}"]`);
+        const label = input.value.trim();
+        if (!label) return;
+        try {
+            await put(`/api/units/${unitId}/tutorial-slots/${slotId}`, { label });
+            document.getElementById('slotMsg').style.color = '#22c55e';
+            document.getElementById('slotMsg').textContent = 'Renamed (student data updated).';
+            await renderSlotList();
+        } catch(e) {
+            document.getElementById('slotMsg').style.color = '#e94560';
+            document.getElementById('slotMsg').textContent = e.message;
+        }
+    }
+    async function deleteSlot(slotId, label) {
+        if (!confirm(`Delete "${label}"? Any student selections of this slot will be removed.`)) return;
+        try {
+            await del(`/api/units/${unitId}/tutorial-slots/${slotId}`);
+            document.getElementById('slotMsg').style.color = '#22c55e';
+            document.getElementById('slotMsg').textContent = 'Deleted.';
+            await renderSlotList();
+        } catch(e) {
+            document.getElementById('slotMsg').style.color = '#e94560';
+            document.getElementById('slotMsg').textContent = e.message;
+        }
+    }
 </script>
 <!-- Edit Rules Modal -->
 <div class="t-modal-overlay" id="editRulesModal">
@@ -241,6 +308,28 @@
         <div class="t-modal-actions">
             <button class="t-modal-cancel" onclick="closeEditRules()">Cancel</button>
             <button class="t-modal-save" onclick="saveRules()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Manage Tutorial Slots Modal -->
+<div class="t-modal-overlay" id="manageSlotsModal">
+    <div class="t-modal-box">
+        <h3>Manage Tutorial Slots</h3>
+        <p style="font-size:13px;color:#666;margin-bottom:12px">
+            Renaming a slot updates every student's existing selection of it. Deleting removes it from their selections too.
+        </p>
+        <div id="slotList" style="margin-bottom:14px"></div>
+        <div class="t-modal-field">
+            <label>Add a new slot</label>
+            <div style="display:flex;gap:8px">
+                <input type="text" id="newSlotLabel" placeholder="e.g. Monday 10am" style="flex:1">
+                <button onclick="addSlot()" style="padding:6px 14px">Add</button>
+            </div>
+        </div>
+        <p id="slotMsg" class="t-save-msg"></p>
+        <div class="t-modal-actions">
+            <button class="t-modal-cancel" onclick="closeSlotManager()">Close</button>
         </div>
     </div>
 </div>
