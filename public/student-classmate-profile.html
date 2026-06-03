@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classmate Profile - TeamUp</title>
+    <link rel="stylesheet" href="style1.css">
+    <link rel="stylesheet" href="teacher-style.css">
+    <style>
+        body.t-page { min-height: 100vh; height: auto; overflow: visible; }
+        .t-dashboard-layout { min-height: auto; }
+        .classmate-shell {
+            flex: 1;
+            min-width: 0;
+            background: #d3ecf5;
+            padding: 34px 64px 24px;
+        }
+        .classmate-card {
+            background: #fff;
+            border-radius: 8px;
+            padding: 30px 64px 34px;
+            color: #2a3a4a;
+            height: auto;
+        }
+        .classmate-grid {
+            display: grid;
+            grid-template-columns: minmax(280px, 360px) 1px minmax(320px, 1fr);
+            gap: 64px;
+            align-items: stretch;
+        }
+        .classmate-name {
+            font-size: 20px;
+            font-weight: 800;
+            color: #1a2a4a;
+            margin-bottom: 8px;
+        }
+        .classmate-role {
+            font-size: 13px;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 28px;
+        }
+        .profile-section {
+            max-width: 290px;
+            margin-bottom: 24px;
+        }
+        .profile-section-title {
+            background: #7ec8e3;
+            color: #fff;
+            border-radius: 6px;
+            padding: 9px 14px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 13px;
+        }
+        .profile-list {
+            margin-left: 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+            font-size: 14px;
+            font-weight: 400;
+            color: #555;
+            line-height: 1.55;
+        }
+        .classmate-divider {
+            width: 1px;
+            border-left: 2px dotted #1a2a4a;
+            align-self: stretch;
+            margin: 24px 0;
+        }
+        .compatibility-panel {
+            padding-top: 86px;
+        }
+        .compatibility-panel h2 {
+            font-size: 20px;
+            font-weight: 800;
+            color: #1a2a4a;
+            margin-bottom: 26px;
+        }
+        .compatibility-list {
+            display: flex;
+            flex-direction: column;
+            gap: 26px;
+        }
+        .compatibility-row {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            font-size: 14px;
+            color: #2a3a4a;
+        }
+        .compatibility-star {
+            color: #f5c800;
+            font-size: 30px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .compatibility-row strong {
+            color: #1a2a4a;
+            font-weight: 800;
+        }
+        .classmate-actions {
+            display: grid;
+            grid-template-columns: minmax(220px, 290px) minmax(220px, 290px);
+            gap: 32px;
+            margin-top: 48px;
+        }
+        .classmate-actions .t-open-btn {
+            border-radius: 6px;
+        }
+        .classmate-empty {
+            background: #f7fbff;
+            border: 1.5px dashed #a9c8dc;
+            border-radius: 8px;
+            padding: 16px 18px;
+            color: #5a7a9a;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.5;
+        }
+        @media (max-width: 980px) {
+            .classmate-shell { padding: 24px 18px; }
+            .classmate-card { padding: 26px 22px; }
+            .classmate-grid { grid-template-columns: 1fr; gap: 20px; }
+            .classmate-divider { display: none; }
+            .compatibility-panel { padding-top: 0; }
+            .classmate-actions { grid-template-columns: 1fr; gap: 12px; margin-top: 24px; }
+            .profile-section { max-width: 100%; }
+        }
+    </style>
+</head>
+<body class="t-page">
+<header class="t-header">
+    <button class="t-logout-btn" onclick="studentLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">Classmate Profile</h1>
+        <p>Welcome, <span id="welcome-name"></span>!</p>
+    </div>
+    <a class="logo" href="#"><img class="logo-icon" src="teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span></a>
+</header>
+<div class="t-divider"></div>
+<div class="t-dashboard-layout">
+    <nav class="t-sidebar-nav" id="student-sidebar"></nav>
+    <main class="classmate-shell">
+        <section class="classmate-card" id="classmate-card">
+            <p style="color:#888">Loading...</p>
+        </section>
+    </main>
+</div>
+<footer class="t-footer">High Fidelity Design Concept.</footer>
+<script src="api.js"></script>
+<script src="student-nav.js"></script>
+<script>
+    let unitId, classmateId, classmate;
+
+    const splitValues = value => (value || '')
+        .split(',')
+        .map(v => v.trim())
+        .filter(Boolean);
+
+    const escapeHtml = value => String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+
+    const hasOverlap = (a, b) => a.some(item => b.includes(item));
+
+    function renderSection(title, values) {
+        const items = values.length ? values : ['Not set yet'];
+        return `
+            <div class="profile-section">
+                <div class="profile-section-title">${escapeHtml(title)}</div>
+                <ul class="profile-list">
+                    ${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    function compatibility(myPrefs, mate) {
+        const myTutorials = splitValues(myPrefs?.tutorial_slots);
+        const mateTutorials = splitValues(mate.tutorial_slots || mate.tutorial_time);
+        const myInterests = splitValues(myPrefs?.project_interests);
+        const mateInterests = splitValues(mate.project_interests);
+        const mySkills = splitValues(myPrefs?.skills);
+        const mateSkills = splitValues(mate.skills);
+        const myRole = (myPrefs?.preferred_role || '').trim();
+        const mateRole = (mate.preferred_role || '').trim();
+
+        const sharedTutorial = hasOverlap(myTutorials, mateTutorials);
+        const sharedInterest = hasOverlap(myInterests, mateInterests);
+        const sharedSkill = hasOverlap(mySkills, mateSkills);
+        const roleConflict = !!myRole && !!mateRole && myRole === mateRole;
+        const score = [sharedTutorial, sharedInterest, sharedSkill, !roleConflict]
+            .filter(Boolean).length;
+
+        return {
+            sharedTutorial,
+            sharedInterest,
+            skillBalance: sharedSkill,
+            roleConflict,
+            overall: Math.round((score / 4) * 100)
+        };
+    }
+
+    function renderCompatibility(result) {
+        return `
+            <div class="compatibility-panel">
+                <h2>Compatibility with You</h2>
+                <div class="compatibility-list">
+                    <div class="compatibility-row"><span class="compatibility-star">★</span><span><strong>Shared tutorial:</strong> ${result.sharedTutorial ? 'Yes' : 'No'}</span></div>
+                    <div class="compatibility-row"><span class="compatibility-star">★</span><span><strong>Shared interest:</strong> ${result.sharedInterest ? 'Yes' : 'No'}</span></div>
+                    <div class="compatibility-row"><span class="compatibility-star">★</span><span><strong>Skill balance:</strong> ${result.skillBalance ? 'Strong' : 'Developing'}</span></div>
+                    <div class="compatibility-row"><span class="compatibility-star">★</span><span><strong>Role conflict:</strong> ${result.roleConflict ? 'Yes' : 'No'}</span></div>
+                    <div class="compatibility-row"><span class="compatibility-star">★</span><span><strong>Overall match:</strong> ${result.overall}%</span></div>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderTeamSection(teamData) {
+        if (!teamData) {
+            return renderSection('Current Team', ['Not on a team yet']);
+        }
+        const teamName = teamData.team?.team_name || `Team ${teamData.team?.team_number ?? ''}`.trim();
+        const memberNames = (teamData.members || [])
+            .map(m => m.name || m.student_id)
+            .filter(Boolean);
+        const size = (teamData.members || []).length;
+        const max = teamData.maxSize || size;
+        const items = [
+            `${teamName} (${size} / ${max} members)`,
+            ...memberNames.map(n => `• ${n}`)
+        ];
+        return `
+            <div class="profile-section">
+                <div class="profile-section-title">Current Team</div>
+                <ul class="profile-list">
+                    ${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+
+    function renderPage(myPrefs, teamData) {
+        const mateTutorials = splitValues(classmate.tutorial_slots || classmate.tutorial_time);
+        const mateInterests = splitValues(classmate.project_interests);
+        const mateSkills = splitValues(classmate.skills);
+        const result = compatibility(myPrefs, classmate);
+
+        document.getElementById('classmate-card').innerHTML = `
+            <div class="classmate-grid">
+                <div>
+                    <h2 class="classmate-name">${escapeHtml(classmate.name || classmate.student_id)}</h2>
+                    <p class="classmate-role">Preferred Role: ${escapeHtml(classmate.preferred_role || 'Not set')}</p>
+                    ${renderSection('Tutorial Availability', mateTutorials)}
+                    ${renderSection('Interests', mateInterests)}
+                    ${renderSection('Skills', mateSkills)}
+                    ${renderTeamSection(teamData)}
+                </div>
+                <div class="classmate-divider"></div>
+                ${renderCompatibility(result)}
+            </div>
+            <div class="classmate-actions">
+                ${classmate.team_id
+                    ? `<button class="t-open-btn" onclick="proposeMerge('${classmate.team_id}')">Propose Merge</button>`
+                    : `<button class="t-open-btn" style="background:#aaa;cursor:not-allowed" disabled>No team yet</button>`
+                }
+                <button class="t-open-btn" onclick="window.location='/student-find-teammates.html?unitId=${unitId}'">Close</button>
+            </div>
+        `;
+    }
+
+    async function proposeMerge(targetTeamId) {
+        try {
+            const r = await post(`/api/student/units/${unitId}/proposals`, { targetTeamId });
+            if (r.state === 'approved') {
+                alert('Merge approved! Your teams are now combined.');
+                window.location = `/student-my-team.html?unitId=${unitId}`;
+            } else {
+                alert('Merge proposal sent. Awaiting votes from both teams.');
+            }
+        } catch (e) { alert(e.message); }
+    }
+
+    (async () => {
+        const params = new URLSearchParams(location.search);
+        classmateId = params.get('studentId');
+        const nav = await initStudentNav({ activeItem:'find-teammates', pageTitle:'Classmate Profile' });
+        if (!nav) return;
+        unitId = nav.unitId;
+
+        const [students, myPrefs] = await Promise.all([
+            get(`/api/student/units/${unitId}/students`),
+            get(`/api/student/units/${unitId}/prefs`).catch(() => null)
+        ]);
+
+        classmate = students.find(s => s.student_id === classmateId);
+
+        if (!classmate) {
+            document.getElementById('classmate-card').innerHTML =
+                `<div class="classmate-empty">Could not find that classmate profile.
+                    <button class="t-open-btn" style="width:220px;margin-top:14px" onclick="window.location='/student-find-teammates.html?unitId=${unitId}'">Back to Teammates</button>
+                </div>`;
+            return;
+        }
+
+        const teamData = classmate.team_id
+            ? await get(`/api/student/units/${unitId}/teams/${classmate.team_id}`).catch(() => null)
+            : null;
+
+        renderPage(myPrefs, teamData);
+    })().catch(err => {
+        document.getElementById('classmate-card').innerHTML =
+            `<div class="classmate-empty">Could not load classmate profile: ${escapeHtml(err.message)}</div>`;
+    });
+</script>
+</body>
+</html>

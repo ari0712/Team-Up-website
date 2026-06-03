@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Find Teammates – TeamUp</title>
+    <link rel="stylesheet" href="style1.css">
+    <link rel="stylesheet" href="teacher-style.css">
+    <style>
+        .s-search-bar { display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap }
+        .s-search-bar input, .s-search-bar select { border:1.5px solid #d0dff0;border-radius:8px;padding:8px 12px;font-size:14px;outline:none }
+        .s-search-bar input { flex:1;min-width:180px }
+        .s-teammate-card { background:#fff;border-radius:12px;padding:18px 20px;border:1.5px solid #d0dff0;margin-bottom:12px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px }
+        .s-teammate-info h3 { font-size:20px;font-weight:800;margin-bottom:4px }
+        .s-teammate-info p  { font-size:13px;color:#666 }
+        .s-match-reasons { font-size:13px;color:#555;line-height:1.9 }
+        .s-match-reasons span { display:block }
+        .s-match-percent { font-size:14px;font-weight:700;text-align:right;color:#1a2a4a;margin-bottom:8px }
+        .s-invite-row { display:flex;gap:10px;margin-top:12px }
+    </style>
+</head>
+<body class="t-page">
+<header class="t-header">
+    <button class="t-logout-btn" onclick="studentLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">Find Teammates</h1>
+        <p>Welcome, <span id="welcome-name"></span>!</p>
+    </div>
+    <a class="logo" href="#"><img class="logo-icon" src="teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span></a>
+</header>
+<div class="t-divider"></div>
+<div style="display:flex">
+    <nav class="t-sidebar-nav" id="student-sidebar"></nav>
+    <div style="flex:1;padding:28px 32px;overflow-y:auto">
+        <h2 style="font-size:19px;font-weight:800;margin-bottom:6px">Find Teammates</h2>
+        <p style="font-size:13px;color:#555;margin-bottom:18px">Search manually or use TeamUp recommendations.</p>
+        <div class="s-search-bar">
+            <input id="search" type="text" placeholder="Search by name or student ID…" oninput="filterStudents()">
+            <select id="filter-tutorial" onchange="filterStudents()">
+                <option value="">Any tutorial</option>
+            </select>
+            <select id="filter-interest" onchange="filterStudents()">
+                <option value="">Any interest</option>
+                <option>Web Development</option><option>UX/UI Design</option>
+                <option>Data Analysis</option><option>Cybersecurity</option>
+                <option>AI / Matching Logic</option><option>Business Analysis</option>
+            </select>
+            <select id="filter-skill" onchange="filterStudents()">
+                <option value="">Any skill</option>
+                <option>React</option><option>JavaScript</option>
+                <option>Database Design</option><option>Backend Development</option>
+                <option>UI Design</option><option>Testing</option>
+            </select>
+        </div>
+        <div style="margin-bottom:18px">
+            <p style="font-size:14px;font-weight:600;margin-bottom:8px">Not sure who to choose?</p>
+            <button class="t-open-btn" style="width:180px;background:#1a2a4a" onclick="alert('Auto-match coming soon!')">Auto-Match Me</button>
+        </div>
+        <div id="student-list"><p style="color:#888">Loading…</p></div>
+    </div>
+</div>
+<footer class="t-footer">High Fidelity Design Concept.</footer>
+<script src="api.js"></script>
+<script src="student-nav.js"></script>
+<script>
+    let allStudents = [], unitId;
+
+    (async () => {
+        const nav = await initStudentNav({ activeItem:'find-teammates', pageTitle:'Find Teammates' });
+        if (!nav) return;
+        unitId = nav.unitId;
+
+        // Populate the tutorial-time filter from the teacher's slot list.
+        try {
+            const slots = await get(`/api/student/units/${unitId}/tutorial-slots`);
+            const sel = document.getElementById('filter-tutorial');
+            slots.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.label; opt.textContent = s.label;
+                sel.appendChild(opt);
+            });
+        } catch(e) { console.error('Could not load tutorial slots:', e); }
+
+        // Every enrolled student is on a team-of-1, so we don't need to fetch it here.
+        allStudents = await get(`/api/student/units/${unitId}/students`);
+        renderStudents(allStudents);
+    })();
+
+    function filterStudents() {
+        const search   = document.getElementById('search').value.toLowerCase();
+        const tutorial = document.getElementById('filter-tutorial').value;
+        const interest = document.getElementById('filter-interest').value;
+        const skill    = document.getElementById('filter-skill').value;
+        let filtered = allStudents;
+        if (search)   filtered = filtered.filter(s => s.name.toLowerCase().includes(search) || s.student_id.toLowerCase().includes(search));
+        if (tutorial) filtered = filtered.filter(s => (s.tutorial_slots || s.tutorial_time || '').includes(tutorial));
+        if (interest) filtered = filtered.filter(s => (s.project_interests || '').includes(interest));
+        if (skill)    filtered = filtered.filter(s => (s.skills || '').includes(skill));
+        renderStudents(filtered);
+    }
+
+    function renderStudents(students) {
+        const list = document.getElementById('student-list');
+        if (!students.length) { list.innerHTML = '<p style="color:#888">No students match your filters.</p>'; return; }
+        list.innerHTML = students.map(s => {
+            const skills  = (s.skills || '').split(',').filter(Boolean);
+            const interests = (s.project_interests || '').split(',').filter(Boolean);
+            const tutorial = s.tutorial_slots || s.tutorial_time || '';
+            return `
+      <div class="s-teammate-card">
+        <div class="s-teammate-info">
+          <h3>${s.name || s.student_id}</h3>
+          <p>${s.preferred_role || 'Role not set'}</p>
+          <div class="s-match-reasons" style="margin-top:8px">
+            ${tutorial ? `<span>⭐ Tutorial: ${tutorial.split(',')[0]}</span>` : ''}
+            ${interests[0] ? `<span>⭐ Interest: ${interests[0]}</span>` : ''}
+            ${skills[0]    ? `<span>⭐ Skill: ${skills[0]}</span>` : ''}
+          </div>
+          <div class="s-invite-row">
+            <button class="t-open-btn" style="width:140px;background:#fff;color:#2663ff;border:1.5px solid #2663ff"
+              onclick="viewProfile('${s.student_id}')">View Profile</button>
+            ${s.team_id
+                ? `<button class="t-open-btn" style="width:140px" onclick="proposeMerge('${s.team_id}')">Propose Merge</button>`
+                : `<button class="t-open-btn" style="width:140px;background:#aaa;cursor:not-allowed" disabled>No team yet</button>`
+            }
+          </div>
+        </div>
+      </div>`;
+        }).join('');
+    }
+
+    async function proposeMerge(targetTeamId) {
+        try {
+            const r = await post(`/api/student/units/${unitId}/proposals`, { targetTeamId });
+            if (r.state === 'approved') {
+                alert('Merge approved! Your teams are now combined.');
+                window.location = `/student-my-team.html?unitId=${unitId}`;
+            } else {
+                alert('Merge proposal sent. Awaiting votes from both teams.');
+            }
+        } catch(e) { alert(e.message); }
+    }
+
+    function viewProfile(id) {
+        window.location = `/student-classmate-profile.html?unitId=${unitId}&studentId=${encodeURIComponent(id)}`;
+    }
+</script>
+</body>
+</html>
