@@ -64,45 +64,50 @@ Open `http://localhost:3000` to reach the portal-select page. From there you sig
 
 ## Project structure
 
+The backend follows a layered, object-oriented design wired by dependency
+injection. `server.js` is the **composition root**: it constructs one `Database`,
+the repositories, and the services, then injects them into the route factories.
+Each layer depends only on abstractions handed to it, which keeps units testable
+in isolation and makes adding a new entity a matter of subclassing
+`BaseRepository` + adding a service.
+
 ```
 teamup-web/
-├── server.js                 Express app entry point (mounts all API routers)
-├── db.js                     sql.js SQLite wrapper — creates schema, auto-saves to teamup.db
+├── server.js                 Composition root — builds the object graph, injects, mounts routers
+├── db/
+│   ├── Database.js           class Database — sql.js connection + all/get/run/tx/save
+│   └── SchemaMigrator.js     class SchemaMigrator — DDL + one-shot data migrations
 ├── teamup.db                 SQLite database file (created/updated at runtime)
-├── repositories/             Data-access layer (raw SQL)
-│   ├── userRepository.js
-│   ├── studentRepository.js
-│   ├── teamRepository.js
-│   └── inviteRepository.js
-├── services/                 Business logic
-│   ├── authService.js        SHA-256 password hashing, login/signup
-│   ├── studentService.js     profile + filter/sort logic
-│   ├── teamService.js        team create/join/leave
-│   ├── inviteService.js      legacy invite send/accept/reject
-│   └── proposalService.js    auto-matching proposals (experimental)
-├── routes/                   Express REST API
+├── repositories/             Data-access layer (classes, raw SQL)
+│   ├── BaseRepository.js     base class holding the injected Database
+│   ├── userRepository.js     class UserRepository extends BaseRepository
+│   └── studentRepository.js  class StudentRepository extends BaseRepository
+├── services/                 Business logic (classes, constructor injection)
+│   ├── authService.js        class AuthService — SHA-256 hashing, login/signup
+│   ├── studentService.js     class StudentService — student profile lookup
+│   └── proposalService.js    class ProposalService — vote-gated team merge proposals
+├── routes/                   Express REST API (router factories: deps → router)
 │   ├── auth.js               login / signup / logout / me
-│   ├── students.js           legacy student list, onboarding, profile
-│   ├── invites.js            legacy team invites
-│   ├── teams.js              legacy teams (all / incomplete / current / leave)
 │   ├── units.js              teacher: units, class lists, progress, team reviews, announcements
-│   └── student.js            student: join units, preferences, teams, invites, submit
+│   └── student.js            student: join units, preferences, teams, proposals, submit
 ├── middleware/auth.js        Session guards (requireAuth / requireStudent / requireTeacher)
-├── utils/                    Helpers (uuid, team-size parsing)
+├── utils/                    Helpers (uuid, team-size parsing, team validation)
 └── public/                   Frontend (static HTML / CSS / vanilla JS)
     ├── index.html            Portal select
-    ├── login.html, signup.html
-    ├── student-*.html        Student portal pages
-    ├── teacher-*.html        Teacher portal pages
-    ├── api.js                Shared fetch/table/modal helpers
-    └── *.css                 Styles
+    ├── login.html, signup.html   Shared auth pages
+    ├── student/              Student portal pages (home, dashboard, my-team, …)
+    ├── teacher/              Teacher portal pages (home, dashboard, class-list, …)
+    └── assets/
+        ├── css/              style1.css, teacher-style.css, style.css
+        ├── js/               api.js (fetch/table/modal helpers), student-nav.js
+        └── img/              icons
 ```
 
 ## Database
 
 SQLite, stored as a single `teamup.db` file in the project root. The schema is
-created automatically by `db.js` on startup (idempotent `CREATE TABLE IF NOT EXISTS`
-plus a few additive `ALTER TABLE` migrations). Key tables:
+created automatically by `db/SchemaMigrator.js` on startup (idempotent
+`CREATE TABLE IF NOT EXISTS` plus a few additive `ALTER TABLE` migrations). Key tables:
 
 | Table | Purpose |
 |-------|---------|
@@ -112,9 +117,9 @@ plus a few additive `ALTER TABLE` migrations). Key tables:
 | `unit_students` | class list imported per unit |
 | `student_progress` | per-student stage tracking within a unit |
 | `student_unit_prefs` | per-student preferences within a unit |
-| `unit_teams` / `unit_team_members` / `unit_team_invites` | unit-scoped teams, membership, invites |
+| `unit_teams` / `unit_team_members` | unit-scoped teams and membership |
+| `proposals` / `proposal_votes` | vote-gated team merge proposals |
 | `unit_announcements` | teacher announcements per unit |
-| `teams` / `team_invites` | legacy global teams and invites |
 
 ## API Reference
 
@@ -160,13 +165,9 @@ session of the matching role.
 | POST | `/units/:unitId/teams/:teamId/invite` | Invite a classmate |
 | POST | `/units/:unitId/teams/:teamId/submit` | Submit team for review |
 | DELETE | `/units/:unitId/teams/:teamId/members/:studentId` | Remove a member |
-| GET  | `/units/:unitId/invites` | Pending invites for the caller |
-| PUT  | `/units/:unitId/invites/:inviteId` | Accept / decline an invite |
-
-### Legacy student/team endpoints
-`/api/students` (list, onboarding, profile), `/api/invites` (received, sent, send,
-accept, reject), and `/api/teams` (all, incomplete, current, leave) are earlier
-global-scope endpoints retained from the first version of the app.
+| POST | `/units/:unitId/proposals` | Propose merging with another team |
+| GET  | `/units/:unitId/proposals` | List proposals the caller is part of |
+| PATCH | `/units/:unitId/proposals/:id/vote` | Vote yes / no on a proposal |
 
 ## Notes & limitations
 

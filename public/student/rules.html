@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rules – TeamUp</title>
+    <link rel="stylesheet" href="/assets/css/style1.css">
+    <link rel="stylesheet" href="/assets/css/teacher-style.css">
+</head>
+<body class="t-page">
+<header class="t-header">
+    <button class="t-logout-btn" onclick="studentLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">Rules and Deadline</h1>
+        <p>Welcome, <span id="welcome-name"></span>!</p>
+    </div>
+    <a class="logo" href="#"><img class="logo-icon" src="/assets/img/teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span></a>
+</header>
+
+<div class="t-divider"></div>
+
+<div class="t-dashboard-layout">
+    <nav class="t-sidebar-nav" id="student-sidebar"></nav>
+    <div class="t-dash-content" style="padding:28px 32px;max-width:560px">
+        <div style="background:#fff;border-radius:14px;padding:28px;border:1.5px solid #d0dff0;">
+            <h2 style="font-size:20px;font-weight:800;margin-bottom:6px">Team Formation Rules</h2>
+            <p style="font-size:13px;color:#555;margin-bottom:18px">Make sure your team follows the required rules.</p>
+            <span style="background:#f5c800;border-radius:8px;padding:5px 14px;font-weight:700;font-size:13px">Required Rules</span>
+            <ul id="required-rules" style="margin:14px 0 20px 16px;font-size:14px;line-height:2"></ul>
+            <span style="background:#f5c800;border-radius:8px;padding:5px 14px;font-weight:700;font-size:13px">Matching Preferences</span>
+            <ul style="margin:14px 0 0 16px;font-size:14px;line-height:2">
+                <li>+ Shared project interests</li>
+                <li>+ Balanced skills</li>
+                <li>+ Different preferred roles</li>
+                <li>+ Preferred teammate choices</li>
+            </ul>
+        </div>
+        <button class="t-open-btn" id="continueBtn" style="margin-top:28px;width:260px;opacity:0.4;cursor:not-allowed" disabled>
+            I Understand, Continue
+        </button>
+    </div>
+    <div class="t-vert-divider"></div>
+    <aside class="t-progress-aside" style="padding:28px 32px">
+        <div style="margin-bottom:32px">
+            <p style="font-size:14px;font-weight:700;color:#1a2a4a">Invitation Response Time</p>
+            <p style="font-size:30px;font-weight:900;color:#1a2a4a">24 hours</p>
+        </div>
+        <div>
+            <p style="font-size:15px;font-weight:700;color:#e94560">Final Team Formation Deadline</p>
+            <p style="font-size:28px;font-weight:900;color:#1a2a4a" id="deadline-display">Loading…</p>
+        </div>
+    </aside>
+</div>
+
+<footer class="t-footer">High Fidelity Design Concept.</footer>
+
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/student-nav.js"></script>
+<script>
+    (async () => {
+        const nav = await initStudentNav({ activeItem: 'rules', pageTitle: 'Rules and Deadline' });
+        if (!nav) return;
+        const { unitId } = nav;
+
+        const unit = await requireUnitAccess(unitId);
+        if (!unit) return;
+        const sizes = (unit.valid_team_sizes || '4').split(',').map(s => s.trim());
+        const sizeRange = sizes.length > 1 ? `${sizes[0]}–${sizes[sizes.length-1]}` : sizes[0];
+
+        const rules = [
+            `Team must have ${sizeRange} students`,
+            unit.max_one_group   ? 'Every student can only be in one team'          : null,
+            unit.must_share_tutorial ? 'All members must share at least one tutorial' : null,
+            `Maximum ${unit.max_new_to_qut} new-to-QUT students in one team`
+        ].filter(Boolean);
+
+        document.getElementById('required-rules').innerHTML =
+            rules.map(r => `<li>✓ ${r}</li>`).join('');
+
+        if (unit.deadline) {
+            const d = new Date(unit.deadline);
+            document.getElementById('deadline-display').textContent =
+                d.toLocaleDateString('en-AU', { weekday:'long', hour:'numeric', minute:'2-digit' });
+        } else {
+            document.getElementById('deadline-display').textContent = 'No deadline set';
+        }
+
+        // Enable button after 2 seconds so students read the rules
+        setTimeout(() => {
+            const btn = document.getElementById('continueBtn');
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+        }, 2000);
+
+        document.getElementById('continueBtn').onclick = async () => {
+            await fetch(`/api/student/units/${unitId}/progress`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stage: 'read_rules', value: 1 })
+            });
+            window.location = `/student/preferences.html?unitId=${unitId}`;
+        };
+    })();
+</script>
+</body>
+</html>

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Ramabhadra&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style1.css" />
+  <link rel="stylesheet" href="/assets/css/style1.css" />
 </head>
 <body>
 
@@ -15,7 +15,7 @@
   <header>
     <a href="index.html" class="logo" aria-label="TeamUp Home">
       <!-- logo -->
-      <img src="teamup-icon.png" alt="" class="logo-icon" aria-hidden="true" />
+      <img src="/assets/img/teamup-icon.png" alt="" class="logo-icon" aria-hidden="true" />
       <span class="logo-text">
         <span class="team">Team</span><span class="up">Up</span>
       </span>
@@ -30,7 +30,7 @@
       <div class="card-header">
         <div class="icon-badge">
           <!-- icon -->
-          <img src="graduation-cap.png" alt="Graduation cap" class="icon-badge" />
+          <img src="/assets/img/graduation-cap.png" alt="Graduation cap" class="icon-badge" />
         </div>
         <h2 class="card-title">Teacher Portal</h2>
       </div>
@@ -46,7 +46,7 @@
       <div class="card-header">
         <div class="icon-badge">
           <!-- icon -->
-          <img src="graduation-cap.png" alt="Graduation cap" class="icon-badge" />
+          <img src="/assets/img/graduation-cap.png" alt="Graduation cap" class="icon-badge" />
         </div>
         <h2 class="card-title">Student Portal</h2>
       </div>
@@ -57,11 +57,11 @@
     </div>
 
   </main>
-  <script src="api.js"></script>
+  <script src="/assets/js/api.js"></script>
   <script>
     // If already logged in, redirect to dashboard
     get('/api/auth/me').then(user => {
-      window.location = user.role === 'STUDENT' ? '/student.html' : '/teacher.html';
+      window.location = user.role === 'STUDENT' ? '/student/home.html' : '/teacher/home.html';
     }).catch(() => {});
 
     function go(role) {

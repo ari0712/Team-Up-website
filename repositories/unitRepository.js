@@ -1,0 +1,95 @@
+const BaseRepository = require('./BaseRepository');
+
+// Data access for the `units` table.
+class UnitRepository extends BaseRepository {
+  findById(unitId) {
+    return this.get(`SELECT * FROM units WHERE unit_id = ?`, [unitId]);
+  }
+
+  // Teacher ownership-scoped lookup. Returns null when the unit is not owned.
+  findOwned(unitId, teacherId) {
+    return this.get('SELECT * FROM units WHERE unit_id = ? AND created_by = ?',
+      [unitId, teacherId]);
+  }
+
+  // Teacher's units, each with live student/in-team counts.
+  listForTeacher(teacherId) {
+    return this.all(
+      `SELECT u.*,
+          (SELECT COUNT(*) FROM unit_students us WHERE us.unit_id = u.unit_id) AS student_count,
+          (SELECT COUNT(DISTINCT tm.student_id)
+           FROM unit_team_members tm
+           INNER JOIN unit_teams t ON t.team_id = tm.team_id
+           WHERE t.unit_id = u.unit_id AND tm.status = 'ACCEPTED') AS students_in_teams
+       FROM units u
+       WHERE u.created_by = ?
+       ORDER BY u.rowid DESC`,
+      [teacherId]
+    );
+  }
+
+  // Units a student is enrolled in (used by the units home page).
+  listEnrolled(studentId) {
+    return this.all(
+      `SELECT u.unit_id, u.unit_name, u.description, u.semester
+       FROM units u
+       INNER JOIN unit_students us ON us.unit_id = u.unit_id
+       WHERE us.student_id = ?
+       ORDER BY u.rowid DESC`,
+      [studentId]
+    );
+  }
+
+  // All units, each flagged with whether the given student has joined.
+  listAllWithJoinedFlag(studentId) {
+    return this.all(
+      `SELECT u.unit_id, u.unit_name, u.description, u.semester, u.deadline,
+              u.valid_team_sizes, u.max_one_group, u.must_share_tutorial, u.max_new_to_qut,
+              CASE WHEN us.student_id IS NOT NULL THEN 1 ELSE 0 END AS joined
+       FROM units u
+                LEFT JOIN unit_students us
+                          ON us.unit_id = u.unit_id AND us.student_id = ?
+       ORDER BY u.rowid DESC`,
+      [studentId]
+    );
+  }
+
+  create(u) {
+    this.run(
+      `INSERT INTO units
+         (unit_id, unit_name, description, semester, deadline, created_by,
+          valid_team_sizes, max_one_group, must_share_tutorial, max_new_to_qut, student_count)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [u.unitId, u.unitName, u.description, u.semester, u.deadline, u.createdBy,
+       u.validTeamSizes, u.maxOneGroup, u.mustShareTutorial, u.maxNewToQut, u.studentCount]
+    );
+  }
+
+  updateRules(unitId, r) {
+    this.run(
+      `UPDATE units SET
+          valid_team_sizes    = ?,
+          max_one_group       = ?,
+          must_share_tutorial = ?,
+          max_new_to_qut      = ?,
+          deadline            = ?
+       WHERE unit_id = ?`,
+      [r.validTeamSizes, r.maxOneGroup, r.mustShareTutorial, r.maxNewToQut, r.deadline, unitId]
+    );
+  }
+
+  // Aggregate progress counts across a unit's students.
+  aggregateProgress(unitId) {
+    return this.get(
+      `SELECT
+         COALESCE(SUM(read_rules),          0) AS readRules,
+         COALESCE(SUM(entered_preferences), 0) AS enteredPrefs,
+         COALESCE(SUM(in_team),             0) AS inTeam,
+         COALESCE(SUM(submitted_request),   0) AS submittedRequest
+       FROM student_progress WHERE unit_id = ?`,
+      [unitId]
+    );
+  }
+}
+
+module.exports = UnitRepository;

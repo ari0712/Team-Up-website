@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Preferences – TeamUp</title>
+    <link rel="stylesheet" href="/assets/css/style1.css">
+    <link rel="stylesheet" href="/assets/css/teacher-style.css">
+    <style>
+        .pref-section { background:#fff;border-radius:14px;padding:22px 24px;border:1.5px solid #d0dff0;margin-bottom:16px }
+        .pref-step-badge { background:#f5c800;border-radius:8px;padding:5px 14px;font-weight:700;font-size:13px;display:inline-block;margin-bottom:14px }
+        .pref-checkbox-grid { display:grid;grid-template-columns:1fr 1fr;gap:8px }
+        .pref-checkbox-grid label { display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer }
+        .pref-radio-list { display:flex;flex-direction:column;gap:8px }
+        .pref-radio-list label { display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer }
+        .pref-text-input { width:100%;border:1.5px solid #d0dff0;border-radius:8px;padding:10px 12px;font-size:14px;outline:none }
+        .pref-layout { display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:28px 32px }
+    </style>
+</head>
+<body class="t-page">
+<header class="t-header">
+    <button class="t-logout-btn" onclick="studentLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">My Preference</h1>
+        <p>Welcome, <span id="welcome-name"></span>!</p>
+    </div>
+    <a class="logo" href="#"><img class="logo-icon" src="/assets/img/teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span></a>
+</header>
+<div class="t-divider"></div>
+<div style="display:flex">
+    <nav class="t-sidebar-nav" id="student-sidebar"></nav>
+    <div style="flex:1;overflow-y:auto">
+        <div class="pref-layout">
+            <!-- Left column -->
+            <div>
+                <div class="pref-section">
+                    <div class="pref-step-badge">Step 1: Tutorial Availability</div>
+                    <div id="tutorial-slots" class="pref-checkbox-grid"></div>
+                </div>
+                <div class="pref-section">
+                    <div class="pref-step-badge">Step 2: Project Interests</div>
+                    <div class="pref-checkbox-grid">
+                        <label><input type="checkbox" name="interest" value="Web Development"> Web Development</label>
+                        <label><input type="checkbox" name="interest" value="UX/UI Design"> UX/UI Design</label>
+                        <label><input type="checkbox" name="interest" value="Data Analysis"> Data Analysis</label>
+                        <label><input type="checkbox" name="interest" value="Cybersecurity"> Cybersecurity</label>
+                        <label><input type="checkbox" name="interest" value="AI / Matching Logic"> AI / Matching Logic</label>
+                        <label><input type="checkbox" name="interest" value="Business Analysis"> Business Analysis</label>
+                    </div>
+                </div>
+                <button class="t-open-btn" onclick="savePrefs()" style="width:220px;margin-top:8px">Save Preferences</button>
+                <p id="save-msg" style="font-size:13px;color:#22c55e;margin-top:8px;display:none">Saved!</p>
+            </div>
+            <!-- Right column -->
+            <div>
+                <div class="pref-section">
+                    <div class="pref-step-badge">Step 3: Skills</div>
+                    <div class="pref-checkbox-grid">
+                        <label><input type="checkbox" name="skill" value="React"> React</label>
+                        <label><input type="checkbox" name="skill" value="JavaScript"> JavaScript</label>
+                        <label><input type="checkbox" name="skill" value="Database Design"> Database Design</label>
+                        <label><input type="checkbox" name="skill" value="Backend Development"> Backend Development</label>
+                        <label><input type="checkbox" name="skill" value="UI Design"> UI Design</label>
+                        <label><input type="checkbox" name="skill" value="Testing"> Testing</label>
+                    </div>
+                </div>
+                <div class="pref-section">
+                    <div class="pref-step-badge">Step 4: Preferred Role</div>
+                    <div class="pref-radio-list">
+                        <label><input type="radio" name="role" value="Team Leader"> Team Leader</label>
+                        <label><input type="radio" name="role" value="Frontend Developer"> Frontend Developer</label>
+                        <label><input type="radio" name="role" value="Backend Developer"> Backend Developer</label>
+                        <label><input type="radio" name="role" value="UX Designer"> UX Designer</label>
+                        <label><input type="radio" name="role" value="Researcher"> Researcher</label>
+                        <label><input type="radio" name="role" value="Documentation Writer"> Documentation Writer</label>
+                    </div>
+                </div>
+                <div class="pref-section">
+                    <div class="pref-step-badge">Step 5: Preferred Teammates</div>
+                    <p style="font-size:13px;color:#555;margin-bottom:8px">Enter student names or IDs, separated by commas (optional)</p>
+                    <input type="text" id="preferred-teammates" class="pref-text-input" placeholder="e.g. Alex Tan, n12345678">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<footer class="t-footer">High Fidelity Design Concept.</footer>
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/student-nav.js"></script>
+<script>
+    let unitId;
+    (async () => {
+        const nav = await initStudentNav({ activeItem: 'preferences', pageTitle: 'My Preference' });
+        if (!nav) return;
+        unitId = nav.unitId;
+
+        // Tutorial slots come from the teacher-managed list for this unit.
+        const unit = await requireUnitAccess(unitId);
+        if (!unit) return;
+        const slots = await get(`/api/student/units/${unitId}/tutorial-slots`);
+        const slotContainer = document.getElementById('tutorial-slots');
+        if (!slots.length) {
+            slotContainer.innerHTML = '<p style="color:#888;font-size:13px">Your teacher hasn’t added any tutorial slots yet.</p>';
+        } else {
+            slotContainer.innerHTML = slots.map(s =>
+                `<label><input type="checkbox" name="tutorial" value="${s.label}"> ${s.label}</label>`
+            ).join('');
+        }
+
+        // Load existing prefs
+        const prefs = await get(`/api/student/units/${unitId}/prefs`);
+        if (prefs) {
+            prefs.tutorial_slots.split(',').forEach(v => {
+                const el = document.querySelector(`input[name="tutorial"][value="${v.trim()}"]`);
+                if (el) el.checked = true;
+            });
+            prefs.project_interests.split(',').forEach(v => {
+                const el = document.querySelector(`input[name="interest"][value="${v.trim()}"]`);
+                if (el) el.checked = true;
+            });
+            prefs.skills.split(',').forEach(v => {
+                const el = document.querySelector(`input[name="skill"][value="${v.trim()}"]`);
+                if (el) el.checked = true;
+            });
+            const roleEl = document.querySelector(`input[name="role"][value="${prefs.preferred_role}"]`);
+            if (roleEl) roleEl.checked = true;
+            document.getElementById('preferred-teammates').value = prefs.preferred_teammates === 'None' ? '' : (prefs.preferred_teammates || '');
+        }
+    })();
+
+    async function savePrefs() {
+        const tutorialSlots     = [...document.querySelectorAll('input[name="tutorial"]:checked')].map(e => e.value);
+        const projectInterests  = [...document.querySelectorAll('input[name="interest"]:checked')].map(e => e.value);
+        const skills            = [...document.querySelectorAll('input[name="skill"]:checked')].map(e => e.value);
+        const preferredRole     = document.querySelector('input[name="role"]:checked')?.value || '';
+        const preferredTeammates = document.getElementById('preferred-teammates').value.trim() || 'None';
+
+        await post(`/api/student/units/${unitId}/prefs`, { tutorialSlots, projectInterests, skills, preferredRole, preferredTeammates });
+        const msg = document.getElementById('save-msg');
+        msg.style.display = 'block';
+        setTimeout(() => { msg.style.display = 'none'; }, 2000);
+    }
+</script>
+</body>
+</html>
