@@ -86,6 +86,22 @@ module.exports = function createStudentRouter({ studentPortalService }) {
       res.json({ ok: true });
     }));
 
+  // ── Notifications ───────────────────────────────────────────────
+  // Both reads sync first, so the inbox and the nav badge are always current
+  // without any event plumbing. Email is dispatched only on the timer.
+  router.get('/units/:unitId/notifications', (req, res) =>
+    send(res, () => res.json(svc.listNotifications(req.params.unitId, sid(req)))));
+
+  router.get('/units/:unitId/notifications/count', (req, res) =>
+    send(res, () => res.json(svc.unreadNotificationCount(req.params.unitId, sid(req)))));
+
+  router.patch('/units/:unitId/notifications/:id/read', (req, res) =>
+    send(res, () => res.json(
+      svc.markNotificationRead(req.params.unitId, sid(req), parseInt(req.params.id)))));
+
+  router.post('/units/:unitId/notifications/read-all', (req, res) =>
+    send(res, () => res.json(svc.markAllNotificationsRead(req.params.unitId, sid(req)))));
+
   // ── Membership mutations ────────────────────────────────────────
   router.delete('/units/:unitId/teams/:teamId/members/:studentId', (req, res) =>
     send(res, () => {

@@ -43,6 +43,20 @@ body.t-page {
     margin: 0;
 }
 
+/* style1.css styles the bare `main` element as a centred flex column, which is
+   right for the portal-select splash but wrong for a portal page: it shrink-wraps
+   every child to its content width and floats it in the middle of the page. The
+   page shells are inconsistently `<main>` or `<div>` (the student dashboard is a
+   div, the teacher one is a main), so the same class laid out differently on the
+   two portals. Reset it here — index.html doesn't load this sheet, so the splash
+   keeps its centring — and let each card's own width/max-width do the work. */
+.t-page main {
+    display: block;
+    align-items: initial;
+    justify-content: initial;
+    gap: 0;
+}
+
 /* ── Main area ── */
 .t-main {
     flex: 1;
@@ -387,6 +401,19 @@ body.t-page {
     font-weight: 600;
     margin-bottom: 3px;
 }
+.t-deadline-edit-btn {
+    margin-top: 10px;
+    background: rgba(255,255,255,0.18);
+    color: #fff;
+    border: 1.5px solid rgba(255,255,255,0.55);
+    border-radius: 8px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.t-deadline-edit-btn:hover { background: rgba(255,255,255,0.30); }
 .t-warning-circle {
     width: 74px;
     height: 74px;
@@ -520,6 +547,14 @@ body.t-page {
 /* ── Create form additions ── */
 .t-input-wide { width: 320px; }
 .t-csv-count  { font-size: 13px; color: #22c55e; font-weight: 600; }
+.t-csv-hint   { font-size: 12px; color: #5a7a9a; margin-top: 8px; line-height: 1.5; }
+.t-csv-hint code {
+    background: #eef4fb;
+    border: 1px solid #d0ddf0;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11.5px;
+}
 
 .t-modal-overlay {
     display: none; position: fixed; inset: 0;
@@ -547,6 +582,19 @@ body.t-page {
 .t-modal-save:hover { background: #1a4fcc; }
 .t-modal-cancel { background: none; border: 1.5px solid #d0dff0; border-radius: 8px; padding: 11px 20px; font-size: 14px; font-weight: 700; cursor: pointer; color: #555; }
 .t-save-msg { font-size: 13px; color: #22c55e; font-weight: 600; min-height: 18px; margin-top: 8px; text-align: right; }
+/* Unread notification count in the student sidebar */
+.t-snav-badge {
+    background: #e94560;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    padding: 3px 7px;
+    border-radius: 20px;
+    margin-left: 6px;
+    flex-shrink: 0;
+}
+
 /* Student sidebar refinements */
 .t-snav-active {
     display: flex;

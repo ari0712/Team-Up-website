@@ -75,6 +75,14 @@ class TeamRepository extends BaseRepository {
       [teamId, studentId]);
   }
 
+  // Used after a teacher reshuffle leaves a team with nobody in it — an empty
+  // team row would otherwise linger in every teams listing.
+  deleteIfEmpty(teamId) {
+    if (this.countMembers(teamId) > 0) return false;
+    this.run(`DELETE FROM unit_teams WHERE team_id = ?`, [teamId]);
+    return true;
+  }
+
   transferOwnership(teamId, newOwnerId) {
     this.run(`UPDATE unit_teams SET created_by = ? WHERE team_id = ?`, [newOwnerId, teamId]);
   }
@@ -94,10 +102,16 @@ class TeamRepository extends BaseRepository {
   }
 
   // Members joined with their roster + saved prefs. Used by my-team and all-teams.
+  //
+  // `role` comes from the student's CURRENT preference, not from tm.role:
+  // tm.role is only ever written when the member row is created, and a student
+  // joins a unit before visiting Preferences, so the stored copy is '' for
+  // everyone who joined normally. tm.role remains the fallback for legacy rows.
   getMembersDetailed(unitId, teamId) {
     return this.all(
-      `SELECT tm.student_id, tm.role, tm.status, us.name, us.is_new_to_qut,
-              sup.tutorial_slots
+      `SELECT tm.student_id, tm.status, us.name, us.is_new_to_qut,
+              sup.tutorial_slots,
+              COALESCE(NULLIF(sup.preferred_role, ''), tm.role) AS role
        FROM unit_team_members tm
        INNER JOIN unit_students us ON us.unit_id = ? AND us.student_id = tm.student_id
        LEFT JOIN student_unit_prefs sup ON sup.unit_id = ? AND sup.student_id = tm.student_id
@@ -107,24 +121,30 @@ class TeamRepository extends BaseRepository {
   }
 
   // Name-only member rows (all statuses). Used by the teacher team-requests view.
+  // `role` is resolved live — see getMembersDetailed for why.
   getMembersBasic(unitId, teamId) {
     return this.all(
-      `SELECT tm.student_id, tm.role, tm.status, us.name
+      `SELECT tm.student_id, tm.status, us.name,
+              COALESCE(NULLIF(sup.preferred_role, ''), tm.role) AS role
        FROM unit_team_members tm
        INNER JOIN unit_students us ON us.unit_id = ? AND us.student_id = tm.student_id
+       LEFT JOIN student_unit_prefs sup ON sup.unit_id = ? AND sup.student_id = tm.student_id
        WHERE tm.team_id = ?`,
-      [unitId, teamId]
+      [unitId, unitId, teamId]
     );
   }
 
   // Accepted members only, name-only. Used by the read-only classmate team view.
+  // `role` is resolved live — see getMembersDetailed for why.
   getAcceptedMembersBasic(unitId, teamId) {
     return this.all(
-      `SELECT tm.student_id, tm.role, tm.status, us.name
+      `SELECT tm.student_id, tm.status, us.name,
+              COALESCE(NULLIF(sup.preferred_role, ''), tm.role) AS role
        FROM unit_team_members tm
        INNER JOIN unit_students us ON us.unit_id = ? AND us.student_id = tm.student_id
+       LEFT JOIN student_unit_prefs sup ON sup.unit_id = ? AND sup.student_id = tm.student_id
        WHERE tm.team_id = ? AND tm.status = 'ACCEPTED'`,
-      [unitId, teamId]
+      [unitId, unitId, teamId]
     );
   }
 

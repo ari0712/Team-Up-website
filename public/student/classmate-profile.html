@@ -277,6 +277,20 @@
 
     async function proposeMerge(targetTeamId) {
         try {
+            // Sending a request IS an acceptance — createProposal auto-votes the
+            // initiator yes. So this can be a second competing commitment, and
+            // only one of them will ever take effect.
+            const open = await get(`/api/student/units/${unitId}/proposals`)
+                .then(ps => ps.filter(p => p.state === 'open' && p.my_vote === 'yes'))
+                .catch(() => []);
+            if (open.length && !confirm(
+                    `You've already committed to ${open.length} other team request` +
+                    `${open.length > 1 ? 's' : ''}.\n\n` +
+                    `Sending this one as well means whichever team finishes voting first is the ` +
+                    `one you'll join — the rest will be cancelled.\n\nSend anyway?`)) {
+                return;
+            }
+
             const r = await post(`/api/student/units/${unitId}/proposals`, { targetTeamId });
             if (r.state === 'approved') {
                 alert('Merge approved! Your teams are now combined.');

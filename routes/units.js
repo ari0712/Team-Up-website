@@ -2,7 +2,7 @@ const express = require('express');
 const { requireTeacher, requireStudent } = require('../middleware/auth');
 
 // Factory: receives the UnitService from the composition root.
-module.exports = function createUnitsRouter({ unitService }) {
+module.exports = function createUnitsRouter({ unitService, matchingService }) {
   const router = express.Router();
   const svc = unitService;
 
@@ -69,6 +69,30 @@ module.exports = function createUnitsRouter({ unitService }) {
       const { title, content } = req.body || {};
       res.json(svc.postAnnouncement(req.params.unitId, username(req), title, content));
     }));
+
+  // ── Auto-matching (only once the deadline has locked formation) ──
+  router.get('/:unitId/suggestions', requireTeacher, (req, res) =>
+    send(res, () => res.json(matchingService.suggest(req.params.unitId, username(req)))));
+
+  router.post('/:unitId/apply-teams', requireTeacher, (req, res) =>
+    send(res, () => {
+      // `approve` is deliberately not read: applying always approves, so an old
+      // client sending approve:false cannot strand a team in FORMING.
+      const { teams } = req.body || {};
+      res.json(matchingService.applyTeams(req.params.unitId, username(req), teams));
+    }));
+
+  // ── Roster (who may join) ───────────────────────────────────────
+  router.get('/:unitId/roster', requireTeacher, (req, res) =>
+    send(res, () => res.json(svc.getRoster(req.params.unitId, username(req)))));
+
+  router.post('/:unitId/roster', requireTeacher, (req, res) =>
+    send(res, () => res.json(
+      svc.importRoster(req.params.unitId, username(req), (req.body || {}).students))));
+
+  router.delete('/:unitId/roster', requireTeacher, (req, res) =>
+    send(res, () => res.json(
+      svc.removeFromRoster(req.params.unitId, username(req), (req.body || {}).email))));
 
   // ── Rules ───────────────────────────────────────────────────────
   router.put('/:unitId/rules', requireTeacher, (req, res) =>

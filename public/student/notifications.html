@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notifications – TeamUp</title>
+    <link rel="stylesheet" href="/assets/css/style1.css">
+    <link rel="stylesheet" href="/assets/css/teacher-style.css">
+    <style>
+        .s-card { background:#fff;border-radius:14px;padding:22px 24px;border:1.5px solid #d0dff0;margin-bottom:16px }
+        .s-note-head {
+            display:flex; align-items:center; justify-content:space-between;
+            gap:12px; flex-wrap:wrap; margin-bottom:14px;
+        }
+        .s-note-head h3 { font-size:17px; font-weight:800; }
+        .s-note-count {
+            background:#e94560; color:#fff; font-size:12px; font-weight:700;
+            padding:2px 8px; border-radius:20px; margin-left:8px;
+        }
+        .s-note-row {
+            display:flex; align-items:flex-start; gap:12px;
+            padding:12px 0; border-bottom:1px solid #f0f0f0;
+        }
+        .s-note-row:last-child { border-bottom:none; }
+        .s-note-dot {
+            width:9px; height:9px; border-radius:50%; flex-shrink:0; margin-top:6px;
+            background:#e94560;
+        }
+        .s-note-dot.read { background:#e0e8f0; }
+        .s-note-body { flex:1; min-width:0; }
+        .s-note-title { font-size:14px; font-weight:700; color:#1a2a4a; }
+        .s-note-title.read { font-weight:600; color:#5a6b85; }
+        .s-note-text { font-size:13px; color:#666; margin-top:3px; line-height:1.5; }
+        .s-note-meta { font-size:12px; color:#999; margin-top:4px; }
+        .s-note-type {
+            font-size:11px; font-weight:800; letter-spacing:.4px; text-transform:uppercase;
+            padding:2px 8px; border-radius:20px; background:#eff4ff; color:#2663ff;
+        }
+        .s-note-type.deadline    { background:#fff0f3; color:#e94560; }
+        .s-note-type.team_status { background:#e7f9ee; color:#16a34a; }
+        .s-note-actions { display:flex; gap:8px; flex-shrink:0; }
+        .s-note-btn {
+            background:#fff; color:#2663ff; border:1.5px solid #2663ff;
+            border-radius:8px; padding:5px 12px; font-size:12px; font-weight:700; cursor:pointer;
+        }
+        .s-note-btn:hover { background:#eff4ff; }
+        .s-note-btn.muted { color:#888; border-color:#d0dff0; }
+        .s-note-empty {
+            background:#f7fbff; border:1.5px dashed #a9c8dc; border-radius:8px;
+            padding:18px; color:#5a7a9a; font-size:14px; font-weight:600; text-align:center;
+        }
+    </style>
+</head>
+<body class="t-page">
+<header class="t-header">
+    <button class="t-logout-btn" onclick="studentLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">Notifications</h1>
+        <p>Welcome, <span id="welcome-name"></span>!</p>
+    </div>
+    <a class="logo" href="#"><img class="logo-icon" src="/assets/img/teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span></a>
+</header>
+<div class="t-divider"></div>
+<div class="t-dashboard-layout">
+    <nav class="t-sidebar-nav" id="student-sidebar"></nav>
+    <div class="t-dash-content">
+        <div class="s-card">
+            <div class="s-note-head">
+                <h3>🔔 Notifications <span id="unread-badge" class="s-note-count" style="display:none"></span></h3>
+                <button class="s-note-btn muted" id="read-all-btn" onclick="readAll()" style="display:none">Mark all read</button>
+            </div>
+            <div id="notes-list"><p style="color:#888;font-size:14px">Loading…</p></div>
+        </div>
+    </div>
+</div>
+<footer class="t-footer">High Fidelity Design Concept.</footer>
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/student-nav.js"></script>
+<script>
+    let unitId, notes = [];
+
+    const escapeHtml = value => String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+
+    const TYPE_LABEL = {
+        team_request: 'Team request',
+        team_status:  'Team status',
+        deadline:     'Deadline',
+        announcement: 'Announcement'
+    };
+
+    function whenText(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d)) return '';
+        const mins = Math.round((Date.now() - d) / 60000);
+        if (mins < 1)  return 'just now';
+        if (mins < 60) return `${mins} min ago`;
+        const hrs = Math.round(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        return d.toLocaleString('en-AU', { day:'numeric', month:'short', hour:'numeric', minute:'2-digit' });
+    }
+
+    (async () => {
+        const nav = await initStudentNav({ activeItem:'notifications', pageTitle:'Notifications' });
+        if (!nav) return;
+        unitId = nav.unitId;
+        if (!(await requireUnitAccess(unitId))) return;
+        await load();
+    })().catch(err => {
+        document.getElementById('notes-list').innerHTML =
+            `<div class="s-note-empty">Could not load notifications: ${escapeHtml(err.message)}</div>`;
+    });
+
+    async function load() {
+        notes = await get(`/api/student/units/${unitId}/notifications`);
+        render();
+    }
+
+    function render() {
+        const list = document.getElementById('notes-list');
+        const unread = notes.filter(n => !n.read_at).length;
+
+        const badge = document.getElementById('unread-badge');
+        badge.style.display = unread ? 'inline-block' : 'none';
+        badge.textContent = unread;
+        document.getElementById('read-all-btn').style.display = unread ? 'inline-block' : 'none';
+
+        if (!notes.length) {
+            list.innerHTML = `<div class="s-note-empty">Nothing yet. Team requests, deadline reminders,
+                team updates and teacher announcements will show up here.</div>`;
+            return;
+        }
+
+        list.innerHTML = notes.map(n => {
+            const isRead = !!n.read_at;
+            return `
+              <div class="s-note-row" id="note-${n.id}">
+                <div class="s-note-dot ${isRead ? 'read' : ''}"></div>
+                <div class="s-note-body">
+                  <div class="s-note-title ${isRead ? 'read' : ''}">${escapeHtml(n.title)}</div>
+                  ${n.body ? `<div class="s-note-text">${escapeHtml(n.body)}</div>` : ''}
+                  <div class="s-note-meta">
+                    <span class="s-note-type ${escapeHtml(n.type)}">${escapeHtml(TYPE_LABEL[n.type] || n.type)}</span>
+                    · ${escapeHtml(whenText(n.created_at))}
+                  </div>
+                </div>
+                <div class="s-note-actions">
+                  ${n.link ? `<button class="s-note-btn" onclick="openNote(${n.id}, '${escapeHtml(n.link)}')">Open</button>` : ''}
+                  ${isRead ? '' : `<button class="s-note-btn muted" onclick="markRead(${n.id})">Mark read</button>`}
+                </div>
+              </div>`;
+        }).join('');
+    }
+
+    async function markRead(id) {
+        try {
+            await api('PATCH', `/api/student/units/${unitId}/notifications/${id}/read`);
+            await load();
+        } catch(e) { alert('Could not mark as read: ' + e.message); }
+    }
+
+    // Opening a notification implies you have seen it.
+    async function openNote(id, link) {
+        try { await api('PATCH', `/api/student/units/${unitId}/notifications/${id}/read`); }
+        catch(e) { console.error(e); }
+        window.location = link;
+    }
+
+    async function readAll() {
+        try {
+            await post(`/api/student/units/${unitId}/notifications/read-all`, {});
+            await load();
+        } catch(e) { alert('Could not mark all as read: ' + e.message); }
+    }
+</script>
+</body>
+</html>

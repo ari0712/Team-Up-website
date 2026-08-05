@@ -63,7 +63,7 @@
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/student-nav.js"></script>
 <script>
-    let allStudents = [], unitId;
+    let allStudents = [], unitId, locked = false;
 
     (async () => {
         const nav = await initStudentNav({ activeItem:'find-teammates', pageTitle:'Find Teammates' });
@@ -82,7 +82,21 @@
         } catch(e) { console.error('Could not load tutorial slots:', e); }
 
         // Every enrolled student is on a team-of-1, so we don't need to fetch it here.
-        allStudents = await get(`/api/student/units/${unitId}/students`);
+        // available=1 hides students whose team has been submitted for teacher
+        // approval (or already approved) — they cannot be merged with, so
+        // offering them here would only produce a failed proposal.
+        // Merge requests are refused once the deadline passes, so disable them
+        // here rather than letting every click come back 403.
+        try {
+            const unit = await get(`/api/student/units/${unitId}`);
+            locked = isUnitLocked(unit);
+        } catch { /* leave unlocked; the server still enforces it */ }
+        if (locked) {
+            document.getElementById('student-list')
+                .insertAdjacentHTML('beforebegin', lockedBannerHtml());
+        }
+
+        allStudents = await get(`/api/student/units/${unitId}/students?available=1`);
         renderStudents(allStudents);
     })();
 
@@ -119,7 +133,10 @@
           <div class="s-invite-row">
             <button class="t-open-btn" style="width:140px;background:#fff;color:#2663ff;border:1.5px solid #2663ff"
               onclick="viewProfile('${s.student_id}')">View Profile</button>
-            ${s.team_id
+            ${locked
+                ? `<button class="t-open-btn" style="width:140px;background:#aaa;cursor:not-allowed" disabled
+                     title="The deadline has passed">Formation closed</button>`
+                : s.team_id
                 ? `<button class="t-open-btn" style="width:140px" onclick="proposeMerge('${s.team_id}')">Propose Merge</button>`
                 : `<button class="t-open-btn" style="width:140px;background:#aaa;cursor:not-allowed" disabled>No team yet</button>`
             }

@@ -182,6 +182,19 @@
     <aside class="t-progress-aside">
         <h2 class="t-progress-heading">Class Progress</h2>
         <div id="summary-rows" class="t-progress-rows"></div>
+
+        <h2 class="t-progress-heading" style="margin-top:28px">Who Can Join</h2>
+        <p style="font-size:12px;color:#5a7a9a;line-height:1.5;margin-bottom:10px">
+            Only these email addresses can see and join this unit.
+            <strong id="roster-empty-warn" style="color:#e94560;display:none">
+                With nobody listed, the unit is hidden from all students.</strong>
+        </p>
+        <div id="roster-list" style="font-size:13px;margin-bottom:12px">Loading…</div>
+        <textarea id="roster-input" rows="3" placeholder="student@qut.edu.au, another@qut.edu.au"
+                  style="width:100%;border:1.5px solid #d0dff0;border-radius:8px;padding:8px 10px;
+                         font-size:13px;box-sizing:border-box;resize:vertical"></textarea>
+        <p id="roster-msg" class="t-save-msg" style="text-align:left"></p>
+        <button class="t-open-btn" style="margin-top:6px" onclick="addToRoster()">Add to Class List</button>
     </aside>
 </div>
 
@@ -216,8 +229,75 @@
         document.getElementById('teacherName').textContent = user.username;
         if (!unitId) { window.location = '/teacher/home.html'; return; }
         buildTeacherSidebar('class-list');
-        await loadStudents();
+        await Promise.all([loadStudents(), loadRoster()]);
     })();
+
+    // ── Class list / roster: who is allowed to join at all ──────────────
+    async function loadRoster() {
+        const list = document.getElementById('roster-list');
+        try {
+            const roster = await get(`/api/units/${unitId}/roster`);
+            document.getElementById('roster-empty-warn').style.display = roster.length ? 'none' : 'inline';
+            if (!roster.length) {
+                list.innerHTML = `<p style="color:#888">Nobody added yet.</p>`;
+                return;
+            }
+            list.innerHTML = roster.map(r => `
+                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;
+                            border-bottom:1px solid #eef4fb">
+                  <!-- Always the email: it is the key the allowlist matches on,
+                       so showing a name here would misrepresent what grants
+                       access. The name (when the roster has one) is the tooltip. -->
+                  <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+                               white-space:nowrap"
+                        title="${escapeAttr(r.name ? r.name + ' — ' + r.email : r.email)}">
+                    ${escapeHtml(r.email)}
+                  </span>
+                  <span style="font-size:11px;font-weight:700;padding:2px 7px;border-radius:20px;
+                        ${r.joined ? 'background:#e7f9ee;color:#16a34a' : 'background:#f0f0f0;color:#777'}">
+                    ${r.joined ? 'joined' : 'invited'}
+                  </span>
+                  <button onclick="removeFromRoster('${escapeAttr(r.email)}')"
+                          style="background:none;border:none;color:#e94560;cursor:pointer;
+                                 font-size:14px;line-height:1" title="Remove">✕</button>
+                </div>`).join('');
+        } catch(e) {
+            list.innerHTML = `<p style="color:#e94560">Could not load: ${escapeHtml(e.message)}</p>`;
+        }
+    }
+
+    const escapeHtml = v => String(v ?? '')
+        .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
+        .replaceAll('"','&quot;').replaceAll("'",'&#039;');
+    const escapeAttr = v => escapeHtml(v);
+
+    async function addToRoster() {
+        const box = document.getElementById('roster-input');
+        const msg = document.getElementById('roster-msg');
+        const emails = box.value.split(/[,\s;]+/).map(s => s.trim()).filter(Boolean);
+        if (!emails.length) {
+            msg.style.color = '#e94560'; msg.textContent = 'Enter at least one email address.';
+            return;
+        }
+        try {
+            const r = await post(`/api/units/${unitId}/roster`, {
+                students: emails.map(email => ({ email }))
+            });
+            msg.style.color = '#22c55e';
+            msg.textContent = `Added ${r.added}${r.skipped ? `, skipped ${r.skipped} invalid` : ''}.`;
+            box.value = '';
+            await loadRoster();
+        } catch(e) { msg.style.color = '#e94560'; msg.textContent = e.message; }
+    }
+
+    async function removeFromRoster(email) {
+        if (!confirm(`Remove ${email} from the class list?\n\nIf they have already joined they keep their place; this only stops future joins.`)) return;
+        try {
+            // api.js's del() takes no body; call the core helper directly.
+            await api('DELETE', `/api/units/${unitId}/roster`, { email });
+            await loadRoster();
+        } catch(e) { alert('Could not remove: ' + e.message); }
+    }
 
     async function loadStudents() {
         try {

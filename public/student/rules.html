@@ -80,7 +80,8 @@
         if (unit.deadline) {
             const d = new Date(unit.deadline);
             document.getElementById('deadline-display').textContent =
-                d.toLocaleDateString('en-AU', { weekday:'long', hour:'numeric', minute:'2-digit' });
+                d.toLocaleString('en-AU', { weekday:'long', day:'numeric', month:'long',
+                                            year:'numeric', hour:'numeric', minute:'2-digit' });
         } else {
             document.getElementById('deadline-display').textContent = 'No deadline set';
         }

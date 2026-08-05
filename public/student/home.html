@@ -30,6 +30,13 @@
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/student-nav.js"></script>
 <script>
+    const escapeHtml = value => String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+
     (async () => {
         const nav = await initStudentNav({ activeItem: 'home', pageTitle: 'Student Home' });
         if (!nav) return;
@@ -37,7 +44,20 @@
         try {
             const units = await get('/api/student/units');
             if (!units.length) {
-                grid.innerHTML = '<p class="t-empty">You are not enrolled in any units yet.</p>';
+                // Units are private: you only see one once your teacher has put
+                // your email on its class list. Say so, or an excluded student
+                // just sees an unexplained blank page.
+                grid.innerHTML = `
+                    <p class="t-empty" style="line-height:1.6">
+                      No units yet.<br>
+                      Your teacher adds you to a unit using the email address you
+                      signed up with — <strong>${escapeHtml(nav.user.email || nav.user.username)}</strong>.
+                      Once they do, the unit appears here.<br>
+                      <span style="font-size:13px;color:#8aabbf">
+                        If you expected a unit to be listed, check with your teacher
+                        that they used this address.
+                      </span>
+                    </p>`;
                 return;
             }
             grid.innerHTML = units.map(u => `

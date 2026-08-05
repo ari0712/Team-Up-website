@@ -188,6 +188,37 @@
             border: 1.5px dashed #d0dff0;
             border-radius: 10px;
         }
+        /* ── Deadline lock + organiser ─────────────────────────────────── */
+        .tf-lock { border-radius: 14px; padding: 18px 22px; margin-bottom: 18px;
+                   border: 1.5px solid #d0dff0; background: #fff; }
+        .tf-lock.open   { border-color: #d0dff0; }
+        .tf-lock.closed { border-color: #d03b3b; background: #fdf3f3; }
+        .tf-lock h3 { font-size: 17px; font-weight: 800; color: #1a2a4a; margin: 0 0 6px;
+                      display: flex; align-items: center; gap: 8px; }
+        .tf-lock p { font-size: 13px; color: #555; margin: 0 0 12px; line-height: 1.55; }
+        .tf-lock-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+        .tf-btn { border-radius: 8px; padding: 9px 18px; font-size: 13px; font-weight: 700;
+                  cursor: pointer; border: 1.5px solid #2663ff; background: #2663ff; color: #fff; }
+        .tf-btn.ghost { background: #fff; color: #2663ff; }
+        .tf-btn.go { background: #0ca30c; border-color: #0ca30c; }
+        .tf-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+        .tf-org-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+                       gap: 12px; margin: 14px 0; }
+        .tf-org-team { border: 1.5px solid #d0dff0; border-radius: 12px; padding: 12px 14px; background: #fff; }
+        .tf-org-team.bad { border-color: #fab219; background: #fffdf5; }
+        .tf-org-team h4 { font-size: 14px; font-weight: 800; color: #1a2a4a; margin: 0 0 4px; }
+        .tf-org-reasons { font-size: 11px; color: #666; line-height: 1.5; margin-bottom: 8px; }
+        .tf-org-member { display: flex; align-items: center; gap: 6px; padding: 5px 0;
+                         border-bottom: 1px solid #f0f4fa; font-size: 13px; }
+        .tf-org-member:last-child { border-bottom: none; }
+        .tf-org-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tf-org-role { font-size: 11px; color: #888; }
+        .tf-org-move { font-size: 11px; border: 1.5px solid #d0dff0; border-radius: 6px; padding: 2px 4px; }
+        .tf-org-flag { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 20px; }
+        .tf-org-flag.ok  { background: #eefaee; color: #0a7d0a; }
+        .tf-org-flag.warn { background: #fff8e6; color: #8a6100; }
+        .tf-org-unassigned { border: 1.5px dashed #e94560; background: #fff7f8; }
     </style>
 </head>
 <body class="t-page">
@@ -208,6 +239,11 @@
     <nav class="t-sidebar-nav" id="teacher-sidebar"></nav>
 
     <main class="t-dash-content">
+        <!-- Deadline lock + auto-matching. Suggestions only exist once formation
+             has closed, so before the deadline this is purely informational. -->
+        <div id="lock-panel" class="tf-lock"></div>
+        <div id="organiser" style="display:none"></div>
+
         <div id="status-tabs" class="tf-tabs"></div>
         <div id="teams-sections">
             <p class="t-empty">Loading teams…</p>
@@ -254,8 +290,236 @@
         document.getElementById('teacherName').textContent = user.username;
         if (!unitId) { window.location = '/teacher/home.html'; return; }
         buildTeacherSidebar('team-formation');
-        await loadTeams();
+        await Promise.all([loadTeams(), loadLockPanel()]);
     })();
+
+    // ── Deadline lock + organiser ────────────────────────────────────────
+    // `locked` is derived from the unit's deadline, exactly as the server does
+    // it — no separate flag to fall out of sync.
+    let unitInfo = null, draft = null;
+
+    const isLocked = u => {
+        if (!u || !u.deadline) return false;
+        const at = Date.parse(u.deadline);
+        return !isNaN(at) && at <= Date.now();
+    };
+
+    async function loadLockPanel() {
+        const el = document.getElementById('lock-panel');
+        try {
+            unitInfo = await get(`/api/units/${unitId}`);
+        } catch (e) { el.innerHTML = `<p>Could not load the unit: ${esc(e.message)}</p>`; return; }
+
+        const when = unitInfo.deadline
+            ? new Date(unitInfo.deadline).toLocaleString('en-AU',
+                { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+                  hour: 'numeric', minute: '2-digit' })
+            : null;
+
+        if (!isLocked(unitInfo)) {
+            el.className = 'tf-lock open';
+            el.innerHTML = `
+                <h3>🔓 Team formation is open</h3>
+                <p>${when
+                    ? `Students can form teams until <strong>${esc(when)}</strong>. Grouping suggestions
+                       unlock automatically once that passes.`
+                    : `No deadline is set, so team formation never closes. Set one on the
+                       <a href="/teacher/dashboard.html?unitId=${encodeURIComponent(unitId)}">dashboard</a>
+                       to close formation and unlock grouping suggestions.`}</p>`;
+            return;
+        }
+
+        el.className = 'tf-lock closed';
+        el.innerHTML = `
+            <h3>🔒 Team formation is closed</h3>
+            <p>The deadline passed on <strong>${esc(when)}</strong>. Students can no longer send or accept
+               merge requests, leave a team, or submit for approval — you organise the remaining teams from
+               here. To reopen, push the deadline out on the
+               <a href="/teacher/dashboard.html?unitId=${encodeURIComponent(unitId)}">dashboard</a>.</p>
+            <div class="tf-lock-actions">
+                <button class="tf-btn" onclick="generateSuggestions()">Generate suggestions</button>
+                <button class="tf-btn ghost" onclick="organiseManually()">Organise manually</button>
+            </div>`;
+    }
+
+    // Fail with a cause, not a TypeError three calls deep. A response missing
+    // `teams` means the endpoint did not really answer — most often a server
+    // still running older code, where the SPA catch-all returns index.html
+    // with a 200 and the JSON parse quietly yields {}.
+    function requireSuggestions(s) {
+        if (!s || !Array.isArray(s.teams) || !Array.isArray(s.unassigned)) {
+            throw new Error('the server did not return a grouping. If you have just updated ' +
+                            'the code, restart the server (npm start) and try again.');
+        }
+        return s;
+    }
+
+    async function generateSuggestions() {
+        const org = document.getElementById('organiser');
+        org.style.display = 'block';
+        org.innerHTML = '<p class="t-empty">Matching…</p>';
+        try {
+            const s = requireSuggestions(await get(`/api/units/${unitId}/suggestions`));
+            draft = {
+                teams: s.teams.map(t => ({ members: t.members, reasons: t.reasons })),
+                unassigned: s.unassigned,
+                meta: s,
+            };
+            renderOrganiser('Suggested grouping');
+        } catch (e) {
+            org.innerHTML = `<p class="t-empty">Could not build suggestions: ${esc(e.message)}</p>`;
+        }
+    }
+
+    // Same editor, but starting from nobody grouped — the teacher builds it.
+    async function organiseManually() {
+        const org = document.getElementById('organiser');
+        org.style.display = 'block';
+        org.innerHTML = '<p class="t-empty">Loading students…</p>';
+        try {
+            const s = requireSuggestions(await get(`/api/units/${unitId}/suggestions`));
+            const everyone = [...s.teams.flatMap(t => t.members), ...s.unassigned];
+            draft = { teams: [], unassigned: everyone, meta: s };
+            renderOrganiser('Manual grouping');
+        } catch (e) {
+            org.innerHTML = `<p class="t-empty">Could not load: ${esc(e.message)}</p>`;
+        }
+    }
+
+    function draftValidation(members) {
+        const sizes = String(draft.meta.valid_team_sizes || '4').split(',')
+            .map(n => parseInt(n)).filter(Boolean);
+        const sizeOk = sizes.includes(members.length);
+        const slotSets = members.map(m => new Set(
+            String(m.tutorial_slots || '').split(',').map(x => x.trim()).filter(Boolean)));
+        const shared = slotSets.length
+            ? [...slotSets[0]].filter(s => slotSets.every(set => set.has(s))) : [];
+        const roles = members.map(m => m.preferred_role).filter(Boolean);
+        const dup = roles.length !== new Set(roles).size;
+        const newCount = members.filter(m => m.is_new_to_qut).length;
+        return { sizeOk, shared, dup, newCount,
+                 newOk: draft.meta.max_new_to_qut == null || newCount <= draft.meta.max_new_to_qut };
+    }
+
+    function renderOrganiser(title) {
+        const org = document.getElementById('organiser');
+        const groups = draft.teams.map((t, i) => ({ label: `Team ${i + 1}`, idx: i, members: t.members, reasons: t.reasons }));
+        const options = i => [
+            ...groups.map(g => `<option value="${g.idx}" ${g.idx === i ? 'selected' : ''}>${esc(g.label)}</option>`),
+            `<option value="new">+ New team</option>`,
+            `<option value="un" ${i === null ? 'selected' : ''}>Unassigned</option>`,
+        ].join('');
+
+        const card = (g) => {
+            const v = draftValidation(g.members);
+            const bad = !v.sizeOk || !v.newOk || (draft.meta.must_share_tutorial && !v.shared.length);
+            return `
+            <div class="tf-org-team ${bad ? 'bad' : ''}">
+                <h4>${esc(g.label)} · ${g.members.length} members</h4>
+                <div class="tf-org-reasons">
+                    <span class="tf-org-flag ${v.sizeOk ? 'ok' : 'warn'}">${v.sizeOk ? '✓' : '!'} size ${g.members.length}</span>
+                    <span class="tf-org-flag ${v.shared.length ? 'ok' : 'warn'}">${v.shared.length ? '✓ ' + esc(v.shared[0]) : '! no shared tutorial'}</span>
+                    <span class="tf-org-flag ${v.dup ? 'warn' : 'ok'}">${v.dup ? '! repeated role' : '✓ distinct roles'}</span>
+                    <span class="tf-org-flag ${v.newOk ? 'ok' : 'warn'}">${v.newOk ? '✓' : '!'} ${v.newCount} new-to-QUT</span>
+                </div>
+                ${g.members.map(m => `
+                    <div class="tf-org-member">
+                        <span class="tf-org-name">${esc(m.name || m.student_id)}
+                            <span class="tf-org-role">${esc(m.preferred_role || 'no role')}</span></span>
+                        <select class="tf-org-move" onchange="moveStudent('${esc(m.student_id)}', this.value)">
+                            ${options(g.idx)}
+                        </select>
+                    </div>`).join('') || '<p style="font-size:12px;color:#888">Empty</p>'}
+            </div>`;
+        };
+
+        const unassignedCard = `
+            <div class="tf-org-team tf-org-unassigned">
+                <h4>Unassigned · ${draft.unassigned.length}</h4>
+                <div class="tf-org-reasons">${draft.unassigned.length && draft.meta.unassigned_reason
+                    ? esc(draft.meta.unassigned_reason)
+                    : 'These students will keep their current team unless you place them.'}</div>
+                ${draft.unassigned.map(m => `
+                    <div class="tf-org-member">
+                        <span class="tf-org-name">${esc(m.name || m.student_id)}
+                            <span class="tf-org-role">${esc(m.preferred_role || 'no role')}</span></span>
+                        <select class="tf-org-move" onchange="moveStudent('${esc(m.student_id)}', this.value)">
+                            ${options(null)}
+                        </select>
+                    </div>`).join('') || '<p style="font-size:12px;color:#888">Nobody</p>'}
+            </div>`;
+
+        const anyBad = groups.some(g => {
+            const v = draftValidation(g.members);
+            return !v.sizeOk || !v.newOk || (draft.meta.must_share_tutorial && !v.shared.length);
+        });
+
+        org.innerHTML = `
+            <div class="tf-lock open">
+                <h3>${esc(title)}</h3>
+                <p>Move any student with the dropdown beside their name. Teams marked in amber break one of
+                   this unit's rules — you can still approve them, but they are flagged so the choice is
+                   deliberate. Students left unassigned keep the team they are in now.</p>
+                <div class="tf-org-grid">${groups.map(card).join('')}${unassignedCard}</div>
+                <div class="tf-lock-actions">
+                    <button class="tf-btn go" onclick="applyDraft()" ${groups.length ? '' : 'disabled'}>
+                        Apply &amp; approve ${groups.length} team${groups.length === 1 ? '' : 's'}</button>
+                    <button class="tf-btn ghost" onclick="cancelDraft()">Cancel</button>
+                </div>
+                ${anyBad ? '<p style="font-size:12px;color:#8a6100;margin-top:10px">⚠ Some teams break a unit rule.</p>' : ''}
+                <p id="org-msg" style="font-size:13px;font-weight:700;margin-top:8px"></p>
+            </div>`;
+    }
+
+    function moveStudent(studentId, target) {
+        // Pull them out of wherever they are.
+        let moved = null;
+        draft.unassigned = draft.unassigned.filter(m => {
+            if (m.student_id === studentId) { moved = m; return false; }
+            return true;
+        });
+        draft.teams.forEach(t => {
+            t.members = t.members.filter(m => {
+                if (m.student_id === studentId) { moved = m; return false; }
+                return true;
+            });
+        });
+        if (!moved) return;
+
+        if (target === 'un') draft.unassigned.push(moved);
+        else if (target === 'new') draft.teams.push({ members: [moved], reasons: [] });
+        else draft.teams[parseInt(target)]?.members.push(moved);
+
+        draft.teams = draft.teams.filter(t => t.members.length);   // drop emptied teams
+        renderOrganiser(document.querySelector('#organiser h3').textContent);
+    }
+
+    function cancelDraft() {
+        draft = null;
+        document.getElementById('organiser').style.display = 'none';
+        document.getElementById('organiser').innerHTML = '';
+    }
+
+    // Applying always approves. Organising only happens after the deadline, and
+    // once locked a student cannot submit — so a team left FORMING here could
+    // never be finished by anyone. There is deliberately no unapproved path.
+    async function applyDraft() {
+        const msg = document.getElementById('org-msg');
+        const groups = draft.teams.map(t => t.members.map(m => m.student_id)).filter(g => g.length);
+        if (!groups.length) { msg.style.color = '#e94560'; msg.textContent = 'Build at least one team first.'; return; }
+        try {
+            const r = await post(`/api/units/${unitId}/apply-teams`, { teams: groups });
+            msg.style.color = '#0a7d0a';
+            msg.textContent = `${r.teams.length} team${r.teams.length === 1 ? '' : 's'} created and approved.`;
+            cancelDraft();
+            await loadTeams();
+        } catch (e) { msg.style.color = '#e94560'; msg.textContent = e.message; }
+    }
+
+    function esc(v) {
+        return String(v ?? '').replace(/[&<>"']/g, c =>
+            ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    }
 
     async function loadTeams() {
         try {
@@ -379,6 +643,10 @@
         if (!team) return;
         const v = team.validation;
         const isSubmitted = team.status === 'SUBMITTED';
+        // Approve is offered on any team that is not already approved, not just
+        // submitted ones. A FORMING team after the deadline can no longer be
+        // submitted by its students, so gating on SUBMITTED left it unreachable.
+        const canApprove = team.status !== 'APPROVED';
         document.getElementById('modal-body').innerHTML = `
             <h3>${team.team_name || 'Team'} <span class="tf-status-badge tf-status-${team.status.toLowerCase()}">${team.status}</span></h3>
             <p style="font-size:13px;color:#888;margin-bottom:14px">ID: ${team.team_id}</p>
@@ -393,11 +661,13 @@
             <div style="margin-top:16px;font-size:13px;color:#555">
                 <strong>Shared tutorial:</strong> ${v.sharedTutorials[0] || 'None'}
             </div>
-            ${isSubmitted ? `
+            ${canApprove ? `
                 <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
                     <button class="tf-approve-btn" onclick="reviewTeam('${teamId}','approve')">Approve Team</button>
-                    <button class="tf-reject-btn"  onclick="reviewTeam('${teamId}','reject')">Reject Team</button>
-                </div>` : ''}
+                    ${isSubmitted ? `<button class="tf-reject-btn" onclick="reviewTeam('${teamId}','reject')">Reject Team</button>` : ''}
+                </div>
+                ${isSubmitted ? '' : `<p style="font-size:12px;color:#666;margin-top:8px">
+                    This team was never submitted. Approving it finalises it directly.</p>`}` : ''}
         `;
         document.getElementById('teamModal').classList.add('open');
     }

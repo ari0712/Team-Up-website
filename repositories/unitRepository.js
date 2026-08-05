@@ -40,17 +40,28 @@ class UnitRepository extends BaseRepository {
     );
   }
 
-  // All units, each flagged with whether the given student has joined.
-  listAllWithJoinedFlag(studentId) {
+  // Units this student is ALLOWED to see, each flagged with whether they have
+  // joined. The INNER JOIN on unit_roster is the access control: a unit with no
+  // roster row for this email is invisible, and a unit with no roster at all is
+  // invisible to everyone.
+  //
+  // (This replaces an earlier listAllWithJoinedFlag that selected every unit
+  // with no WHERE clause, which let any student see and join any teacher's unit.
+  // Do not reintroduce an unfiltered variant.)
+  listRosteredWithJoinedFlag(studentId, email) {
+    const e = String(email ?? '').trim().toLowerCase();
+    if (!e) return [];
     return this.all(
       `SELECT u.unit_id, u.unit_name, u.description, u.semester, u.deadline,
               u.valid_team_sizes, u.max_one_group, u.must_share_tutorial, u.max_new_to_qut,
               CASE WHEN us.student_id IS NOT NULL THEN 1 ELSE 0 END AS joined
        FROM units u
+                INNER JOIN unit_roster r
+                          ON r.unit_id = u.unit_id AND r.email = ?
                 LEFT JOIN unit_students us
                           ON us.unit_id = u.unit_id AND us.student_id = ?
        ORDER BY u.rowid DESC`,
-      [studentId]
+      [e, studentId]
     );
   }
 

@@ -13,6 +13,7 @@
 //   GET    /api/student/units/:unitId/proposals
 //          → 200 [{
 //              proposal_id, state, expires_at, created_at, resolved_at,
+//              // state: open|approved|rejected|expired|invalidated|auto_cancelled
 //              initiator_id,
 //              source_team_id, source_team_name,
 //              target_team_id, target_team_name,
@@ -35,7 +36,8 @@ const crypto = require('crypto');
 const { parseTeamSizesCsv } = require('../utils/teamSizes');
 const ServiceError = require('./ServiceError');
 
-// Tunable — the proposal lifetime before timeout auto-approval kicks in.
+// Tunable — how long a proposal stays open before it lapses. Reaching this
+// deadline without unanimous consent expires the proposal; it never merges.
 const PROPOSAL_TIMEOUT_MS = 48 * 60 * 60 * 1000;
 
 function nowIso() { return new Date().toISOString(); }
@@ -187,12 +189,16 @@ class ProposalService {
   }
 
   // ── resolveProposal — single source of truth ─────────────────────────────────
+  // Only unanimous, explicit consent merges two teams. Running out the clock
+  // lets the proposal lapse; silence is NOT consent.
+  //
   // Branches (in order):
-  //   1. Already terminal       → no-op.
-  //   2. Any vote='no'          → reject.
-  //   3. Approve conditions met AND a team is no longer FORMING → invalidate.
-  //   4. allYes OR (expired AND !hasNo) → approve + execute merge.
-  //   5. else → leave open.
+  //   1. Already terminal          → no-op.
+  //   2. Any vote='no'             → reject.
+  //   3. Not allYes AND expired    → expire (nothing is mutated).
+  //   4. Not allYes AND not expired→ leave open.
+  //   5. allYes AND a team is no longer FORMING → invalidate.
+  //   6. allYes                    → approve + execute merge.
   resolveProposal(proposalId, actingVoter = null) {
     const proposal = this.getProposal(proposalId);
     if (!proposal) throw new ServiceError('Proposal not found', 404);
@@ -217,11 +223,25 @@ class ProposalService {
       return { proposalId, state: 'rejected', resolved: true };
     }
 
-    const shouldApprove = allYes || (expired && !hasNo);
-    if (!shouldApprove)
-      return { proposalId, state: 'open', resolved: false };
+    // 3/4. Without unanimous consent the deadline lapses the proposal rather
+    // than merging. allYes is checked first so a proposal that became unanimous
+    // just before the sweep still merges instead of being killed by the clock.
+    if (!allYes) {
+      if (!expired)
+        return { proposalId, state: 'open', resolved: false };
 
-    // 3. Approving, but a team has left FORMING (e.g., submitted) → invalidate.
+      // Expired → no team is mutated, so team status is irrelevant here.
+      this.db.tx(db => {
+        db.run(
+          `UPDATE proposals SET state = 'expired', resolved_at = ? WHERE proposal_id = ?`,
+          [now, proposalId]
+        );
+        this.resetSeenAtExceptActor(db, proposalId, actingVoter);
+      });
+      return { proposalId, state: 'expired', resolved: true };
+    }
+
+    // 5. Approving, but a team has left FORMING (e.g., submitted) → invalidate.
     const source = this.db.get(`SELECT status FROM unit_teams WHERE team_id = ?`,
       [proposal.source_team_id]);
     const target = this.db.get(`SELECT status FROM unit_teams WHERE team_id = ?`,
@@ -238,7 +258,7 @@ class ProposalService {
       return { proposalId, state: 'invalidated', resolved: true };
     }
 
-    // 4. Approve + merge + auto-cancel conflicts — all in one transaction.
+    // 6. Approve + merge + auto-cancel conflicts — all in one transaction.
     this.db.tx(db => {
       this.executeMerge(db, proposal, proposalId, now, actingVoter);
     });
@@ -266,6 +286,13 @@ class ProposalService {
       ? proposal.target_team_id
       : proposal.source_team_id;
 
+    // MUST be read before the UPDATE below moves everyone onto the winning
+    // team — afterwards the two memberships are indistinguishable, and the
+    // losing team row is gone entirely. This is the only moment at which
+    // "who merged away" is still answerable.
+    const winnerMembers = this.getAcceptedMemberIds(winner);
+    const loserMembers  = this.getAcceptedMemberIds(loser);
+
     db.run(`UPDATE unit_team_members SET team_id = ? WHERE team_id = ?`, [winner, loser]);
     db.run(`DELETE FROM unit_teams WHERE team_id = ?`, [loser]);
     db.run(
@@ -274,19 +301,31 @@ class ProposalService {
     );
 
     // Auto-cancel every other open proposal touching either team — same tx.
-    const conflictIds = this.db.all(
-      `SELECT proposal_id FROM proposals
+    const conflicts = this.db.all(
+      `SELECT proposal_id, source_team_id, target_team_id FROM proposals
         WHERE state = 'open' AND proposal_id <> ?
           AND (source_team_id IN (?, ?) OR target_team_id IN (?, ?))`,
       [proposalId, winner, loser, winner, loser]
-    ).map(r => r.proposal_id);
+    );
 
-    for (const cid of conflictIds) {
+    for (const c of conflicts) {
+      // Attribute the cancellation to the side of THIS proposal that took part
+      // in the merge, so each viewer's row can say "you" or name the others.
+      // A union rather than a lookup: if a proposal ever touched both teams it
+      // should name everyone rather than silently name nobody.
+      const movers = new Set();
+      if (c.source_team_id === winner || c.target_team_id === winner)
+        winnerMembers.forEach(id => movers.add(id));
+      if (c.source_team_id === loser || c.target_team_id === loser)
+        loserMembers.forEach(id => movers.add(id));
+
       db.run(
-        `UPDATE proposals SET state = 'auto_cancelled', resolved_at = ? WHERE proposal_id = ?`,
-        [now, cid]
+        `UPDATE proposals SET state = 'auto_cancelled', resolved_at = ?,
+                cancelled_by_student_ids = ?
+          WHERE proposal_id = ?`,
+        [now, [...movers].join(','), c.proposal_id]
       );
-      db.run(`UPDATE proposal_votes SET seen_at = NULL WHERE proposal_id = ?`, [cid]);
+      db.run(`UPDATE proposal_votes SET seen_at = NULL WHERE proposal_id = ?`, [c.proposal_id]);
     }
 
     this.resetSeenAtExceptActor(db, proposalId, actingVoter);
@@ -351,13 +390,63 @@ class ProposalService {
     });
   }
 
+  // Resolve `cancelled_by_student_ids` into [{ student_id, name }] for a set of
+  // proposal rows, with ONE lookup for all of them. Shared by the list and the
+  // detail endpoint so a row and its popup can never name different people.
+  attachCancelledBy(unitId, rows) {
+    const ids = new Set();
+    for (const r of rows) {
+      (r.cancelled_by_student_ids || '').split(',').filter(Boolean).forEach(id => ids.add(id));
+    }
+    let names = new Map();
+    if (ids.size) {
+      const placeholders = [...ids].map(() => '?').join(',');
+      names = new Map(
+        this.db.all(
+          `SELECT student_id, name FROM unit_students
+            WHERE unit_id = ? AND student_id IN (${placeholders})`,
+          [unitId, ...ids]
+        ).map(r => [r.student_id, r.name])
+      );
+    }
+    return rows.map(r => ({
+      ...r,
+      cancelled_by: (r.cancelled_by_student_ids || '').split(',').filter(Boolean)
+        .map(id => ({ student_id: id, name: names.get(id) || id }))
+    }));
+  }
+
+  // Called for units whose deadline has passed. Voting is already blocked by
+  // then, but leaving proposals `open` would keep the dashboard showing a live
+  // "auto-declines in Nh" countdown for something that can no longer resolve.
+  // Everyone's seen_at is cleared so the outcome surfaces once.
+  invalidateOpenForUnit(unitId) {
+    const open = this.db.all(
+      `SELECT proposal_id FROM proposals WHERE unit_id = ? AND state = 'open'`,
+      [unitId]
+    ).map(r => r.proposal_id);
+    if (!open.length) return 0;
+
+    const now = nowIso();
+    this.db.tx(db => {
+      for (const pid of open) {
+        db.run(
+          `UPDATE proposals SET state = 'invalidated', resolved_at = ? WHERE proposal_id = ?`,
+          [now, pid]
+        );
+        db.run(`UPDATE proposal_votes SET seen_at = NULL WHERE proposal_id = ?`, [pid]);
+      }
+    });
+    return open.length;
+  }
+
   // ── listProposalsForStudent ─────────────────────────────────────────────────
   // Returns: every OPEN proposal the student is in, plus terminal proposals
   // with my_seen_at IS NULL (so the user can ack a recent outcome).
   listProposalsForStudent(unitId, studentId) {
     const rows = this.db.all(
       `SELECT p.proposal_id, p.state, p.expires_at, p.created_at, p.resolved_at,
-              p.initiator_id,
+              p.initiator_id, p.cancelled_by_student_ids,
               p.source_team_id, ts.team_name AS source_team_name,
               p.target_team_id, tt.team_name AS target_team_name,
               pv.vote AS my_vote, pv.seen_at AS my_seen_at,
@@ -377,7 +466,7 @@ class ProposalService {
         ORDER BY p.created_at DESC`,
       [studentId, unitId]
     );
-    return rows.map(r => ({
+    return this.attachCancelledBy(unitId, rows).map(r => ({
       proposal_id: r.proposal_id,
       state: r.state,
       expires_at: r.expires_at,
@@ -390,6 +479,7 @@ class ProposalService {
       target_team_name: r.target_team_name,
       my_vote: r.my_vote,
       my_seen_at: r.my_seen_at,
+      cancelled_by: r.cancelled_by,
       tally: { yes: r.yes_count, no: r.no_count, pending: r.pending_count }
     }));
   }
@@ -421,7 +511,8 @@ class ProposalService {
         ORDER BY (pv.voted_at IS NULL), pv.voted_at`,
       [unitId, proposalId]
     );
-    return { proposal, votes };
+    // Same helper as the list, so the popup names exactly who the row names.
+    return { proposal: this.attachCancelledBy(unitId, [proposal])[0], votes };
   }
 }
 

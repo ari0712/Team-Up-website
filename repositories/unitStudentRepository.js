@@ -16,6 +16,25 @@ class UnitStudentRepository extends BaseRepository {
     );
   }
 
+  // Enrol a student, carrying across the attributes the teacher supplied on the
+  // roster. Those fields still feed validateTeam (is_new_to_qut) and the
+  // find-teammates search (tutorial_time), so they must land here on join —
+  // the roster row itself is never read by those code paths.
+  enrollFromRoster(unitId, studentId, roster, fallbackName) {
+    this.run(
+      `INSERT INTO unit_students
+         (unit_id, student_id, name, tutorial_time, is_new_to_qut,
+          degree, major, minor, units_passed, it_skill_groups)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      [unitId, studentId,
+       roster?.name || fallbackName || studentId,
+       roster?.tutorial_time || '',
+       roster?.is_new_to_qut ? 1 : 0,
+       roster?.degree || '', roster?.major || '', roster?.minor || '',
+       parseInt(roster?.units_passed) || 0, roster?.it_skill_groups || '']
+    );
+  }
+
   countForUnit(unitId) {
     const row = this.get(`SELECT COUNT(*) AS cnt FROM unit_students WHERE unit_id = ?`, [unitId]);
     return row?.cnt || 0;
@@ -59,7 +78,14 @@ class UnitStudentRepository extends BaseRepository {
               (SELECT tm.team_id FROM unit_team_members tm
                  INNER JOIN unit_teams t ON t.team_id = tm.team_id
                 WHERE tm.student_id = us.student_id AND t.unit_id = us.unit_id
-                LIMIT 1) AS team_id
+                LIMIT 1) AS team_id,
+              -- Only a FORMING team can be merged with; createProposal refuses
+              -- the rest. Returned so callers can hide students who are no
+              -- longer available instead of offering an action that must fail.
+              (SELECT t.status FROM unit_team_members tm
+                 INNER JOIN unit_teams t ON t.team_id = tm.team_id
+                WHERE tm.student_id = us.student_id AND t.unit_id = us.unit_id
+                LIMIT 1) AS team_status
        FROM unit_students us
        LEFT JOIN student_unit_prefs sup ON sup.unit_id = us.unit_id AND sup.student_id = us.student_id
        WHERE us.unit_id = ? AND us.student_id != ?`,

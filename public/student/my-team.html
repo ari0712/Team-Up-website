@@ -51,8 +51,19 @@
         await loadTeam();
     })();
 
+    let locked = false;
+
     async function loadTeam() {
-        teamData = await get(`/api/student/units/${unitId}/my-team`);
+        // Submit / Leave are refused after the deadline, so reflect that in the
+        // buttons instead of surfacing a 403 on click.
+        const [team, unit] = await Promise.all([
+            get(`/api/student/units/${unitId}/my-team`),
+            get(`/api/student/units/${unitId}`).catch(() => null),
+        ]);
+        teamData = team;
+        // Advisory only — the server refuses the actions either way, so a
+        // problem here must not stop the team rendering.
+        try { locked = isUnitLocked(unit); } catch { locked = false; }
         render();
     }
 
@@ -84,6 +95,7 @@
         if (!validation.newToQutOk) fixes.push(`Maximum ${validation.maxNewToQut} new-to-QUT students allowed.`);
 
         el.innerHTML = `
+      ${locked ? lockedBannerHtml('Your teacher will finalise your team.') : ''}
       ${showRejectedNotice ? `
         <div class="s-card" style="border-color:#e94560;background:#fdecee">
           <p style="font-size:14px;font-weight:800;color:#a8253a;margin-bottom:4px">Your last submission was rejected by your teacher.</p>
@@ -113,11 +125,11 @@
         <p class="s-fix-text">This team cannot be submitted yet.</p>
         ${fixes.map(f => `<p class="s-fix-text">Suggested fix: ${f}</p>`).join('')}` : ''}
       <div class="s-action-row">
-        ${!isSubmitted ? `<button class="t-open-btn" style="width:200px" onclick="window.location='/student/find-teammates.html?unitId=${unitId}'">Find More Teammates</button>` : ''}
-        ${!isSubmitted ? `<button class="t-open-btn" style="width:220px;${!allGreen?'background:#aaa;cursor:not-allowed':''}"
+        ${!isSubmitted && !locked ? `<button class="t-open-btn" style="width:200px" onclick="window.location='/student/find-teammates.html?unitId=${unitId}'">Find More Teammates</button>` : ''}
+        ${!isSubmitted && !locked ? `<button class="t-open-btn" style="width:220px;${!allGreen?'background:#aaa;cursor:not-allowed':''}"
             ${!allGreen?'disabled':''} onclick="submitTeam()">Submit Team Request</button>` : ''}
         ${isSubmitted ? `<button class="t-open-btn" style="width:220px;background:#1a2a4a" onclick="window.location='/student/status.html?unitId=${unitId}'">View Status</button>` : ''}
-        ${!isSubmitted ? `<button class="t-open-btn" style="width:180px;background:#e94560" onclick="leaveTeam()">Leave Team</button>` : ''}
+        ${!isSubmitted && !locked ? `<button class="t-open-btn" style="width:180px;background:#e94560" onclick="leaveTeam()">Leave Team</button>` : ''}
       </div>`;
     }
 
