@@ -172,6 +172,150 @@ class MatchingService {
     };
   }
 
+  // ── Student-side Auto-Match ─────────────────────────────────────────────────
+  // Ranks the teams THIS student could merge with, using the very same _score and
+  // weights as the teacher matcher, so the two can never recommend contradictory
+  // things.
+  //
+  // Candidates are TEAMS, not individuals. Every student is eager-assigned a
+  // team-of-one and joining is a vote-gated merge of two whole teams, so merging
+  // with someone in a team of three brings all three. Ranking individuals would
+  // happily suggest a merge that overflows the unit's size rule.
+  //
+  // This recommends only — it never sends a proposal. The student picks.
+  suggestForStudent(unitId, studentId) {
+    const unit = this.units.findById(unitId);          // NOT findOwned: the caller is a student
+    if (!unit) throw new ServiceError('Unit not found', 404);
+
+    const mine = this.teams.findStudentTeam(unitId, studentId);
+    if (!mine) throw new ServiceError('You are not on a team in this unit', 400);
+
+    const byId = new Map();
+    for (const s of this.enrollment.listWithProgress(unitId)) byId.set(s.student_id, s);
+    const shape = (m, fallback = {}) => {
+      const full = byId.get(m.student_id) || fallback;
+      return {
+        student_id: m.student_id,
+        name: full.name || m.name || m.student_id,
+        preferred_role: (full.preferred_role || m.preferred_role || '').trim(),
+        interests: csvSet(full.project_interests ?? m.project_interests),
+        slots: slotsOf(Object.keys(full).length ? full : m),
+        is_new_to_qut: ((full.is_new_to_qut ?? m.is_new_to_qut) == 1) ? 1 : 0,
+      };
+    };
+
+    const myMembers = this.teams.getMembersDetailed(unitId, mine.team_id)
+      .filter(m => m.status === 'ACCEPTED').map(m => shape(m));
+
+    // Only FORMING teams other than my own — exactly what createProposal accepts,
+    // so nothing we suggest can be rejected the moment the student clicks it.
+    const groups = new Map();
+    for (const c of this.enrollment.listClassmates(unitId, studentId)) {
+      if (!c.team_id || c.team_id === mine.team_id) continue;
+      if (c.team_status !== 'FORMING') continue;
+      if (!groups.has(c.team_id)) groups.set(c.team_id, []);
+      groups.get(c.team_id).push(shape(c, c));
+    }
+
+    const sizes = (parseTeamSizesCsv(unit.valid_team_sizes) || [4]).slice().sort((a, b) => a - b);
+    const maxSize = sizes[sizes.length - 1];
+
+    const options = [];
+    for (const [teamId, members] of groups) {
+      if (!members.length) continue;
+      if (myMembers.length + members.length > maxSize) continue;   // would overflow the unit rule
+
+      // Fold their members onto my team one at a time through the shared scorer.
+      // A null at any step means a hard rule (tutorial / new-to-QUT) forbids it.
+      let running = [...myMembers], total = 0, allowed = true;
+      for (const m of members) {
+        const s = this._score(running, m, unit);
+        if (s === null) { allowed = false; break; }
+        total += s;
+        running.push(m);
+      }
+      if (!allowed) continue;
+
+      const merged = running.map(m => ({
+        student_id: m.student_id, status: 'ACCEPTED',
+        tutorial_slots: [...m.slots].join(','),
+        is_new_to_qut: m.is_new_to_qut,
+      }));
+      const validation = validateTeam(merged, unit, { tutorialFallback: true });
+      const team = this.teams.findById(teamId);
+
+      options.push({
+        team_id: teamId,
+        team_name: team?.team_name || 'Team',
+        members: members.map(m => ({
+          student_id: m.student_id, name: m.name, preferred_role: m.preferred_role,
+        })),
+        mergedSize: merged.length,
+        sizeValid: validation.sizeValid,
+        score: total,
+        reasons: this._matchReasons(myMembers, members, validation, merged.length, sizes),
+      });
+    }
+
+    // A merge that completes a legal team wins over a merely higher-scoring one:
+    // reaching a valid size is the point of the exercise. Intermediate merges are
+    // still offered below, or a solo student in a 4/5 unit could only ever match a
+    // team of exactly 3 or 4 — useless while everyone is still solo.
+    options.sort((a, b) =>
+      (b.sizeValid - a.sizeValid) || (b.score - a.score) || a.team_id.localeCompare(b.team_id));
+
+    return {
+      my_team_size: myMembers.length,
+      valid_team_sizes: unit.valid_team_sizes,
+      must_share_tutorial: !!unit.must_share_tutorial,
+      suggestions: options.slice(0, 5),
+      // An empty panel that explains itself beats one that looks broken.
+      why_empty: options.length ? null
+        : this._whyNoMatch(groups.size, myMembers, unit, maxSize),
+    };
+  }
+
+  // Plain English for the same signals that produced the score, derived from them
+  // rather than restated, so the explanation cannot drift from the ranking.
+  _matchReasons(myMembers, theirMembers, validation, mergedSize, sizes) {
+    const out = [];
+    out.push(validation.sharedTutorials.length
+      ? `Shares ${validation.sharedTutorials.join(', ')}`
+      : 'No shared tutorial slot');
+
+    const myRoles = new Set(myMembers.map(m => m.preferred_role).filter(Boolean));
+    const clash = theirMembers.filter(m => m.preferred_role && myRoles.has(m.preferred_role));
+    const fresh = theirMembers.filter(m => m.preferred_role && !myRoles.has(m.preferred_role));
+    out.push(clash.length
+      ? `Repeats your role: ${[...new Set(clash.map(m => m.preferred_role))].join(', ')}`
+      : fresh.length ? `Adds ${[...new Set(fresh.map(m => m.preferred_role))].join(', ')}`
+                     : 'No role set');
+
+    let shared = 0;
+    for (const mine of myMembers)
+      for (const them of theirMembers)
+        for (const i of them.interests) if (mine.interests.has(i)) shared++;
+    out.push(shared ? `${shared} shared interest${shared === 1 ? '' : 's'}` : 'No shared interests');
+
+    out.push(validation.sizeValid
+      ? `Makes a complete team of ${mergedSize}`
+      : `Team of ${mergedSize} — still needs ${Math.min(...sizes.filter(s => s > mergedSize)) - mergedSize || 0} more`);
+    return out;
+  }
+
+  _whyNoMatch(groupCount, myMembers, unit, maxSize) {
+    if (groupCount === 0)
+      return 'Nobody else in this unit is currently open to merging — everyone is either on your ' +
+             'team already or has submitted theirs.';
+    if (unit.must_share_tutorial)
+      return 'This unit requires every team to share a tutorial slot, and no open team shares one ' +
+             'with yours. Check your tutorial times on the Preferences page.';
+    if (myMembers.length >= maxSize)
+      return `Your team is already at the largest size this unit allows (${maxSize}).`;
+    return `Every open team would push you past the largest allowed size (${maxSize}), or breaks the ` +
+           `limit of ${unit.max_new_to_qut} new-to-QUT students per team.`;
+  }
+
   // Diagnose a leftover so the teacher knows which rule to relax rather than
   // being told only that nothing could be built.
   _whyUnassigned(unassigned, pool, unit, minSize) {

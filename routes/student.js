@@ -61,6 +61,10 @@ module.exports = function createStudentRouter({ studentPortalService }) {
   router.get('/units/:unitId/students', (req, res) =>
     send(res, () => res.json(svc.searchClassmates(req.params.unitId, sid(req), req.query))));
 
+  // Ranked merge suggestions for the signed-in student. Recommends only.
+  router.get('/units/:unitId/auto-match', (req, res) =>
+    send(res, () => res.json(svc.autoMatch(req.params.unitId, sid(req)))));
+
   router.get('/units/:unitId/my-team', (req, res) =>
     send(res, () => res.json(svc.getMyTeam(req.params.unitId, sid(req)))));
 

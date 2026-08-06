@@ -52,16 +52,43 @@ class UnitRepository extends BaseRepository {
     const e = String(email ?? '').trim().toLowerCase();
     if (!e) return [];
     return this.all(
+      // Carries the student's OWN standing in each unit — progress stages and
+      // team — so Student Home can answer "do I need to act?" without a second
+      // request per card. Progress flags follow listWithProgress; the team
+      // subqueries follow listClassmates.
       `SELECT u.unit_id, u.unit_name, u.description, u.semester, u.deadline,
               u.valid_team_sizes, u.max_one_group, u.must_share_tutorial, u.max_new_to_qut,
-              CASE WHEN us.student_id IS NOT NULL THEN 1 ELSE 0 END AS joined
+              CASE WHEN us.student_id IS NOT NULL THEN 1 ELSE 0 END AS joined,
+              COALESCE(sp.read_rules,          0) AS read_rules,
+              COALESCE(sp.entered_preferences, 0) AS entered_preferences,
+              COALESCE(sp.in_team,             0) AS in_team,
+              COALESCE(sp.submitted_request,   0) AS submitted_request,
+              COALESCE(sp.teacher_approved,    0) AS teacher_approved,
+              (SELECT tm.team_id FROM unit_team_members tm
+                 INNER JOIN unit_teams t ON t.team_id = tm.team_id
+                WHERE t.unit_id = u.unit_id AND tm.student_id = ? LIMIT 1) AS team_id,
+              (SELECT t.team_name FROM unit_team_members tm
+                 INNER JOIN unit_teams t ON t.team_id = tm.team_id
+                WHERE t.unit_id = u.unit_id AND tm.student_id = ? LIMIT 1) AS team_name,
+              (SELECT t.status FROM unit_team_members tm
+                 INNER JOIN unit_teams t ON t.team_id = tm.team_id
+                WHERE t.unit_id = u.unit_id AND tm.student_id = ? LIMIT 1) AS team_status,
+              -- Accepted only: a pending invitee is not yet a member the student
+              -- should be counted alongside.
+              (SELECT COUNT(*) FROM unit_team_members m
+                WHERE m.team_id = (SELECT tm2.team_id FROM unit_team_members tm2
+                                     INNER JOIN unit_teams t2 ON t2.team_id = tm2.team_id
+                                    WHERE t2.unit_id = u.unit_id AND tm2.student_id = ? LIMIT 1)
+                  AND m.status = 'ACCEPTED') AS team_size
        FROM units u
                 INNER JOIN unit_roster r
                           ON r.unit_id = u.unit_id AND r.email = ?
                 LEFT JOIN unit_students us
                           ON us.unit_id = u.unit_id AND us.student_id = ?
+                LEFT JOIN student_progress sp
+                          ON sp.unit_id = u.unit_id AND sp.student_id = ?
        ORDER BY u.rowid DESC`,
-      [e, studentId]
+      [studentId, studentId, studentId, studentId, e, studentId, studentId]
     );
   }
 

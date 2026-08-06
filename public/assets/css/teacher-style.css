@@ -72,12 +72,24 @@ body.t-page {
 }
 
 /* ── Teacher Home: unit grid ── */
+/* Fixed-width cards in a wrapping flex row left most of the page empty — three
+   270px cards used about a fifth of a 1440px viewport. A grid of flexible tracks
+   lets the cards grow to fill the row instead, and adds columns rather than
+   stretching cards absurdly on very wide screens. */
 .t-unit-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 20px;
     margin-top: 12px;
 }
+/* The empty-state message is a grid item too; span it so it reads as a sentence
+   rather than being squeezed into one column. */
+.t-unit-grid .t-empty { grid-column: 1 / -1; }
+
+/* Teacher Home floats "Add Unit +" into the top-right corner. Now that the cards
+   span the full width, the first row would run underneath it. Scoped to the page
+   that actually has the button, so Student Home gains no stray gap. */
+.t-add-unit-btn + .t-unit-grid { margin-top: 56px; }
 
 .t-add-unit-btn {
     position: absolute;
@@ -99,43 +111,52 @@ body.t-page {
     background: #ffffff;
     border: 2px solid #2663ff;
     border-radius: 12px;
-    width: 270px;
+    /* No fixed width: the grid track sizes it, and grid stretch already equalises
+       heights within a row. A min-height was tried and reverted — Student Home
+       cards carry no stats block, so it only opened a hollow gap above the
+       button. Better a compact honest card than a padded empty one. */
     overflow: hidden;
     display: flex;
     flex-direction: column;
 }
 .t-unit-body {
-    padding: 16px 16px 12px;
+    padding: 22px 24px 18px;
     flex: 1;
 }
 .t-unit-name {
-    font-size: 18px;
+    font-size: 22px;
     font-weight: 800;
     color: #1a2a4a;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
 }
 .t-unit-desc {
-    font-size: 13px;
+    font-size: 14px;
     color: #5a7a9a;
-    margin-bottom: 2px;
+    margin-bottom: 3px;
 }
 .t-unit-sem {
-    font-size: 13px;
+    font-size: 14px;
     color: #5a7a9a;
-    margin-bottom: 12px;
+    margin-bottom: 16px;
 }
 .t-unit-stats {
     border-top: 1px solid #e0ecf8;
-    padding-top: 10px;
+    padding-top: 14px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
 }
 .t-stat-row {
     display: flex;
     justify-content: space-between;
-    font-size: 13px;
+    font-size: 14px;
     color: #3a5070;
+}
+/* Scoped: .t-open-btn is shared by ten pages, so the larger card action must not
+   resize every other button in the app. */
+.t-unit-card .t-open-btn {
+    padding: 14px;
+    font-size: 15px;
 }
 .t-red { color: #e94560; font-weight: 700; }
 

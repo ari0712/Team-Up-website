@@ -138,8 +138,30 @@
         const slots = await get(`/api/student/units/${unitId}/tutorial-slots`);
         const slotContainer = document.getElementById('tutorial-slots');
         if (!slots.length) {
-            slotContainer.innerHTML = '<p style="color:#888;font-size:13px">Your teacher hasn’t added any tutorial slots yet.</p>';
-            document.getElementById('flag-tutorial').remove();   // nothing to require
+            // Say what this MEANS, not just that the list is empty. The question a
+            // student actually has here is "am I blocked?", and the answer is no.
+            // The badge is relabelled rather than removed: every other section
+            // carries one, so a bare step surrounded by red "Required" badges reads
+            // as unfinished and blocking.
+            const flag = document.getElementById('flag-tutorial');
+            flag.className = 'pref-flag optional';
+            flag.textContent = 'Not needed';
+
+            // With must_share_tutorial on and no slots published, the rules page
+            // promises something nothing can satisfy — validateTeam derives shared
+            // tutorials from slot data, so every team reads as not sharing one.
+            // Better to name that now than let it look like the student's fault.
+            const shareNote = unit.must_share_tutorial
+                ? ' This unit also asks teams to share a tutorial, so your team may show that rule ' +
+                  'as unmet until your teacher adds the slots.'
+                : '';
+            // The container is a two-column checkbox grid; prose in one cell wraps
+            // at half width and reads badly, so span both.
+            slotContainer.innerHTML =
+                '<p style="grid-column:1/-1;color:#555;font-size:13px;line-height:1.6;margin:0">' +
+                'Your teacher hasn’t added any tutorial slots yet, so <strong>you can still save your ' +
+                'preferences</strong> — just skip this step. If slots are added later, come back and ' +
+                'pick your times.' + shareNote + '</p>';
         } else {
             tutorialRequired = true;
             slotContainer.innerHTML = slots.map(s =>

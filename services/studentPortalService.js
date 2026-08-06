@@ -9,8 +9,9 @@ const { isLocked } = require('../utils/deadline');
 // HTTP by the router.
 class StudentPortalService {
   constructor({ units, enrollment, roster, progress, prefs, teams, slots, announcements, studentRepo,
-                proposalService, notificationService }) {
+                proposalService, notificationService, matchingService }) {
     this.notificationService = notificationService;
+    this.matchingService = matchingService;
     this.roster = roster;
     this.units = units;
     this.enrollment = enrollment;
@@ -171,6 +172,14 @@ class StudentPortalService {
     const sizes = (unit?.valid_team_sizes || '4').split(',').map(s => parseInt(s.trim())).filter(Boolean);
     const maxSize = sizes.length ? Math.max(...sizes) : 4;
     return { team, members, maxSize };
+  }
+
+  // Ranked merge suggestions for this student. Gated by the same lock as
+  // createProposal — recommending a merge the student cannot act on would be
+  // worse than offering nothing.
+  autoMatch(unitId, studentId) {
+    this._assertOpen(unitId);
+    return this.matchingService.suggestForStudent(unitId, studentId);
   }
 
   // ── Proposals (delegated, with caller-team resolution) ───────────────────────

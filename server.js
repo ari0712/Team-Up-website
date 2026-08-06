@@ -86,15 +86,16 @@ db.connect().then(() => {
     (redirect ? ` — ALL mail redirected to ${redirect}` :
       mailTransport.name === 'smtp' ? ' — WARNING: sending to real stored addresses' : '')
   );
+  // Built before studentPortalService, which now depends on it for Auto-Match.
+  const matchingService = new MatchingService({
+    units: unitRepo, enrollment, teams, prefs, progress
+  });
   const studentPortalService = new StudentPortalService({
     units: unitRepo, enrollment, roster, progress, prefs, teams, slots, announcements,
-    studentRepo, proposalService, notificationService
+    studentRepo, proposalService, notificationService, matchingService
   });
   const unitService = new UnitService({
     units: unitRepo, enrollment, roster, progress, teams, prefs, slots, announcements
-  });
-  const matchingService = new MatchingService({
-    units: unitRepo, enrollment, teams, prefs, progress
   });
 
   app.use('/api/auth',    createAuthRouter({ userRepo, authService, studentService }));

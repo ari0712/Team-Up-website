@@ -158,6 +158,37 @@ function lockedBannerHtml(extra = '') {
       </div>`;
 }
 
+// Shared deadline presentation. `style` picks the wording, not the rules:
+//   'long'  — the dashboard banner's full form
+//   'short' — compact enough for a unit card
+// Always returns an object, so callers never have to guard for a missing or
+// unparseable date and can never render "Invalid Date".
+//
+// Note: dashboard.html and rules.html still format inline. Their exact strings
+// are asserted by the `deadline` suite, so they are deliberately left alone —
+// this exists so Home did not become a third copy of the logic.
+const DEADLINE_FORMATS = {
+    long:  { weekday:'long',  day:'numeric', month:'long',  year:'numeric', hour:'numeric', minute:'2-digit' },
+    short: { weekday:'short', day:'numeric', month:'short', year:'numeric', hour:'numeric', minute:'2-digit' },
+};
+
+function formatDeadline(deadline, style = 'short', now = Date.now()) {
+    const raw = String(deadline ?? '').trim();
+    if (!raw) return { ok: false, text: '', remaining: '', passed: false };
+
+    const at = Date.parse(raw);
+    if (isNaN(at)) return { ok: false, text: '', remaining: '', passed: false };
+
+    const d = new Date(at);
+    const days = Math.ceil((at - now) / (1000 * 60 * 60 * 24));
+    return {
+        ok: true,
+        text: d.toLocaleString('en-AU', DEADLINE_FORMATS[style] || DEADLINE_FORMATS.short),
+        remaining: days > 0 ? `${days} day${days > 1 ? 's' : ''} remaining` : 'Closed',
+        passed: at <= now,
+    };
+}
+
 async function requireUnitAccess(unitId) {
     try {
         const unit = await get(`/api/student/units/${unitId}`);

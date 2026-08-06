@@ -149,7 +149,10 @@
             <p>You can search manually or let TeamUp suggest teammates.</p>
             <div style="display:flex;gap:12px;margin-top:14px">
                 <button class="t-open-btn" style="width:180px" onclick="goTo('find-teammates')">Find Teammates</button>
-                <button class="t-open-btn" style="width:180px;background:#1a2a4a" onclick="alert('Auto-match coming soon!')">Auto-Match Me</button>
+                <!-- Hands off to Find Teammates, which owns the one Auto-Match
+                     implementation, rather than duplicating the panel here. -->
+                <button class="t-open-btn" style="width:180px;background:#1a2a4a"
+                        onclick="goTo('find-teammates', '&automatch=1')">Auto-Match Me</button>
             </div>
         </div>
     </div>
@@ -321,8 +324,8 @@
         goTo('status');
     }
 
-    function goTo(page) {
-        window.location = `/student/${page}.html?unitId=${unitId}`;
+    function goTo(page, extra = '') {
+        window.location = `/student/${page}.html?unitId=${unitId}${extra}`;
     }
 
     // Only shown at 2+ commitments — at 0 or 1 there is no race to warn about.

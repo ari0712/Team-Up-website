@@ -52,6 +52,14 @@ class ProgressRepository extends BaseRepository {
       [unitId, studentId]);
   }
 
+  // Disapprove revokes the teacher's decision but leaves the team submitted, so
+  // only the approval flag is cleared — the students did submit, and that is
+  // still true. Distinct from clearSubmission, which unwinds both.
+  clearTeacherApproval(unitId, studentId) {
+    this.run(`UPDATE student_progress SET teacher_approved = 0 WHERE unit_id = ? AND student_id = ?`,
+      [unitId, studentId]);
+  }
+
   // Reject sends a team back to FORMING — clear both flags so the UI matches.
   clearSubmission(unitId, studentId) {
     this.run(

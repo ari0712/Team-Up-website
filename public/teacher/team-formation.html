@@ -667,7 +667,14 @@
                     ${isSubmitted ? `<button class="tf-reject-btn" onclick="reviewTeam('${teamId}','reject')">Reject Team</button>` : ''}
                 </div>
                 ${isSubmitted ? '' : `<p style="font-size:12px;color:#666;margin-top:8px">
-                    This team was never submitted. Approving it finalises it directly.</p>`}` : ''}
+                    This team was never submitted. Approving it finalises it directly.</p>`}`
+            : `
+                <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+                    <button class="tf-reject-btn" onclick="reviewTeam('${teamId}','unapprove')">Disapprove Team</button>
+                </div>
+                <p style="font-size:12px;color:#666;margin-top:8px">
+                    Returns this team to Submitted so you can review it again. The students keep
+                    their team and are not sent back to forming.</p>`}
         `;
         document.getElementById('teamModal').classList.add('open');
     }
@@ -676,8 +683,14 @@
         document.getElementById('teamModal').classList.remove('open');
     }
 
+    const ACTION_PROMPT = {
+        approve:   'Approve this team?',
+        unapprove: 'Disapprove this team? It goes back to Submitted for review — its members stay together.',
+        reject:    'Reject this team? Its members go back to forming and will need to resubmit.',
+    };
+
     async function reviewTeam(teamId, action) {
-        if (!confirm(`Are you sure you want to ${action} this team?`)) return;
+        if (!confirm(ACTION_PROMPT[action] || `Are you sure you want to ${action} this team?`)) return;
         try {
             await put(`/api/units/${unitId}/team-requests/${teamId}`, { action });
             closeModal();

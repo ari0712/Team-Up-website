@@ -149,20 +149,33 @@ class UnitService {
     return { ok: true, approved: this.teams.approveAllSubmitted(unitId) };
   }
 
+  // approve    → APPROVED
+  // unapprove  → back to SUBMITTED: revokes the decision without disturbing the
+  //              students, returning the team to the review queue where it can be
+  //              approved again or rejected. The true inverse of approve.
+  // reject     → back to FORMING so the members can edit and resubmit.
   reviewTeam(unitId, teacherId, teamId, action) {
-    if (!['approve', 'reject'].includes(action))
-      throw new ServiceError('action must be approve or reject', 400);
+    if (!['approve', 'unapprove', 'reject'].includes(action))
+      throw new ServiceError('action must be approve, unapprove or reject', 400);
     this._ownedOr404(unitId, teacherId);
+
+    const team = this.teams.findById(teamId);
+    if (!team) throw new ServiceError('Team not found', 404);
 
     if (action === 'approve') {
       // A team can reach the teacher without ever being submitted — the students
       // never got round to it, or the deadline locked before they could. Record
       // the submission so submitted_at and the progress rows stay consistent with
       // a normally-submitted team, then approve.
-      const team = this.teams.findById(teamId);
-      if (team && !team.submitted_at)
+      if (!team.submitted_at)
         this.teams.markSubmitted(teamId, new Date().toISOString());
       this.teams.setStatus(teamId, 'APPROVED');
+    } else if (action === 'unapprove') {
+      if (team.status !== 'APPROVED')
+        throw new ServiceError('Only an approved team can be disapproved', 400);
+      // Keeps submitted_at: the students did submit, and undoing the teacher's
+      // decision does not undo theirs.
+      this.teams.setStatus(teamId, 'SUBMITTED');
     } else {
       this.teams.setRejected(teamId, new Date().toISOString());
     }
@@ -174,11 +187,13 @@ class UnitService {
         this.progress.markSubmitted(unitId, m.student_id);
         this.progress.markTeacherApproved(unitId, m.student_id);
       });
+    } else if (action === 'unapprove') {
+      members.forEach(m => this.progress.clearTeacherApproval(unitId, m.student_id));
     } else {
       // Reject sends the team back to FORMING so members can edit and resubmit.
       members.forEach(m => this.progress.clearSubmission(unitId, m.student_id));
     }
-    return { ok: true };
+    return { ok: true, status: this.teams.findById(teamId)?.status };
   }
 
   getAllTeams(unitId, teacherId) {
