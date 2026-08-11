@@ -23,6 +23,7 @@ app.use('/api/invites',  require('./routes/invites'));
 app.use('/api/teams',    require('./routes/teams'));
 app.use('/api/units',    require('./routes/units'));
 app.use('/api/student',  require('./routes/student'));
+app.use('/api/notifications', require('./routes/notifications'));
 
 // All other GETs serve index.html (the portal select page handles routing)
 app.get('*', (req, res) => {

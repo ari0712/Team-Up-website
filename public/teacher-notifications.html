@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeamUp - Notifications</title>
+    <link rel="icon" type="image/png" href="teamup-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Ramabhadra&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style1.css">
+    <link rel="stylesheet" href="teacher-style.css">
+</head>
+<body class="t-page">
+
+<header class="t-header">
+    <button class="t-logout-btn" onclick="doLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1>Notifications</h1>
+        <p>Welcome, <span id="teacherName"></span>!</p>
+    </div>
+    <a class="logo" href="#">
+        <img class="logo-icon" src="teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span>
+    </a>
+</header>
+
+<div class="t-dashboard-layout">
+    <nav class="t-sidebar-nav" id="teacher-sidebar"></nav>
+
+    <main class="t-dash-content" style="display:block">
+        <div class="n-toolbar">
+            <select id="n-unit-filter" class="n-chip" style="display:none"></select>
+            <span id="n-header-count" style="font-size:13px;font-weight:700;color:#3a5070"></span>
+            <span class="n-toolbar-spacer"></span>
+            <button class="n-text-btn" id="n-mark-all" onclick="NotificationFeed.markAll()">Mark all as read</button>
+            <button class="n-text-btn" onclick="NotificationFeed.load()">Refresh</button>
+        </div>
+
+        <div id="n-chips" class="n-toolbar"></div>
+
+        <div id="n-list">
+            <div class="n-empty"><strong>Loading…</strong>Checking your units for updates.</div>
+        </div>
+    </main>
+
+    <div class="t-vert-divider"></div>
+
+    <aside class="t-progress-aside">
+        <h2 class="t-progress-heading">Email Notifications</h2>
+
+        <div class="n-email-card">
+            <h3>Your sign-up email</h3>
+            <p class="n-email-sub">Unit updates are emailed to the address you registered with.</p>
+            <div class="n-email-address" id="n-signup-email">…</div>
+
+            <label class="n-toggle">
+                <input type="checkbox" id="n-email-enabled">
+                Email me about new updates
+            </label>
+
+            <div class="n-field">
+                <label for="n-email-override">Send to a different address (optional)</label>
+                <input type="email" id="n-email-override" placeholder="leave blank to use sign-up email">
+            </div>
+
+            <div class="n-field">
+                <label for="n-min-severity">Only email me about</label>
+                <select id="n-min-severity">
+                    <option value="INFO">Everything</option>
+                    <option value="WARNING">Warnings and above</option>
+                    <option value="CRITICAL">Urgent only</option>
+                </select>
+            </div>
+
+            <p class="n-email-sub" style="margin-bottom:10px">
+                Currently delivering to: <strong id="n-deliver-to">—</strong>
+            </p>
+
+            <button class="t-view-progress-btn" style="width:100%;padding:10px" onclick="EmailPanel.save()">Save</button>
+
+            <p class="n-msg" id="n-email-msg"></p>
+        </div>
+
+        <button class="t-view-progress-btn" onclick="goAnnouncements()">Post an Announcement</button>
+    </aside>
+</div>
+
+<script src="api.js"></script>
+<script src="notifications.js"></script>
+<script>
+    const params = new URLSearchParams(location.search);
+    const unitId = params.get('unitId');
+
+    (async () => {
+        const user = await requireSession('TEACHER');
+        if (!user) return;
+        document.getElementById('teacherName').textContent = user.username;
+        buildTeacherSidebar('notifications');
+
+        await NotificationFeed.init({
+            unitId,
+            emptyText: 'Deadline reminders, newly formed teams and students at risk of missing the ' +
+                       'deadline will appear here.',
+            categories: [
+                { key: 'deadline', label: 'Deadlines' },
+                { key: 'teams',    label: 'Teams' },
+                { key: 'at-risk',  label: 'Students at Risk' }
+            ]
+        });
+
+        await EmailPanel.init();
+    })();
+
+    function buildTeacherSidebar(active) {
+        const nav = document.getElementById('teacher-sidebar');
+        const items = [
+            { key: 'home',           label: 'Home',           href: '/teacher-home.html',             noUnit: true },
+            { key: 'dashboard',      label: 'Dashboard',      href: '/teacher-dashboard.html' },
+            { key: 'team-formation', label: 'Team Formation', href: '/teacher-team-formation.html' },
+            { key: 'class-list',     label: 'Class List',     href: '/teacher-class-list.html' },
+            { key: 'announcements',  label: 'Announcements',  href: '/teacher-announcements.html' },
+            { key: 'notifications',  label: 'Notifications',  href: '/teacher-notifications.html' },
+        ];
+        nav.innerHTML = items.map(item => {
+            const href = item.noUnit ? item.href : (unitId ? `${item.href}?unitId=${unitId}` : '#');
+            if (item.key === active)
+                return `<button class="t-snav-active" id="tsn-${item.key}" style="display:flex;align-items:center;gap:6px">${item.label}</button>`;
+            return `<a class="t-snav-link" href="${href}" id="tsn-${item.key}" style="display:flex;align-items:center;gap:6px">${item.label}</a>`;
+        }).join('');
+
+        // Unread notification count
+        fetch('/api/notifications/count').then(r => r.json()).then(counts => {
+            const unread = counts.unread || 0;
+            if (!unread) return;
+            const el = document.getElementById('tsn-notifications');
+            if (el) el.insertAdjacentHTML('beforeend', `<span class="t-nav-badge">${unread}</span>`);
+        }).catch(() => {});
+    }
+
+    function goAnnouncements() {
+        const target = NotificationFeed.unitFilter !== 'all' ? NotificationFeed.unitFilter : unitId;
+        window.location = target
+            ? `/teacher-announcements.html?unitId=${target}`
+            : '/teacher-home.html';
+    }
+
+    async function doLogout() {
+        await post('/api/auth/logout', {});
+        window.location = '/';
+    }
+</script>
+</body>
+</html>

@@ -32,7 +32,7 @@
     <nav class="t-sidebar-nav" id="teacher-sidebar"></nav>
 
     <!-- Middle content -->
-    <main class="t-dash-content">
+    <main class="t-dash-content" style="display:block">
 
         <!-- Deadline banner -->
         <div class="t-deadline-banner">
@@ -44,9 +44,8 @@
             <div class="t-warning-circle">!</div>
         </div>
 
-        <!-- Unit detail + carousel -->
+        <!-- Unit detail -->
         <div class="t-carousel-row">
-            <button class="t-carousel-chevron">‹</button>
             <div class="t-unit-info-card">
                 <h3 class="t-unit-info-title" id="unitInfoTitle">Loading…</h3>
                 <span class="t-badge-ruleset">Group Rule Set</span>
@@ -159,14 +158,23 @@
             { key: 'team-formation',  label: 'Team Formation', href: '/teacher-team-formation.html' },
             { key: 'class-list',      label: 'Class List',     href: '/teacher-class-list.html' },
             { key: 'announcements',   label: 'Announcements',  href: '/teacher-announcements.html' },
+            { key: 'notifications',   label: 'Notifications',  href: '/teacher-notifications.html' },
         ];
         nav.innerHTML = items.map(item => {
             const href = item.noUnit ? item.href : (unitId ? `${item.href}?unitId=${unitId}` : '#');
             if (item.key === active) {
-                return `<button class="t-snav-active">${item.label}</button>`;
+                return `<button class="t-snav-active" id="tsn-${item.key}" style="display:flex;align-items:center;gap:6px">${item.label}</button>`;
             }
-            return `<a class="t-snav-link" href="${href}">${item.label}</a>`;
+            return `<a class="t-snav-link" href="${href}" id="tsn-${item.key}" style="display:flex;align-items:center;gap:6px">${item.label}</a>`;
         }).join('');
+
+        // Unread notification count badge (non-blocking)
+        fetch('/api/notifications/count').then(r => r.json()).then(counts => {
+            const unread = counts.unread || 0;
+            if (!unread) return;
+            const el = document.getElementById('tsn-notifications');
+            if (el) el.insertAdjacentHTML('beforeend', `<span class="t-nav-badge">${unread}</span>`);
+        }).catch(() => {});
     }
 
     let currentUnit = null;

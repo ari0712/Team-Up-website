@@ -7,6 +7,7 @@ const STUDENT_NAV_ITEMS = [
     { key: 'my-team',        label: 'My Team',        href: '/student-my-team.html',          stage: 'in_team' },
     { key: 'status',         label: 'Status',         href: '/student-status.html',           stage: 'submitted_request' },
     { key: 'final-team',     label: 'Final Team',     href: '/student-final-team.html',       stage: 'teacher_approved' },
+    { key: 'notifications',  label: 'Notifications',  href: '/student-notifications.html',    optionalUnit: true },
 ];
 
 async function initStudentNav({ activeItem, pageTitle }) {
@@ -29,7 +30,6 @@ async function initStudentNav({ activeItem, pageTitle }) {
     // Build sidebar
     const navEl = document.getElementById('student-sidebar');
     if (navEl) {
-        // Fetch progress to show completion dots (non-blocking)
         let progress = {};
         if (unitId) {
             try {
@@ -47,6 +47,13 @@ async function initStudentNav({ activeItem, pageTitle }) {
                 unitName = unit.unit_name || '';
             } catch { /* skip */ }
         }
+
+        // Unread notification count
+        let unreadCount = 0;
+        try {
+            const counts = await fetch('/api/notifications/count').then(r => r.json());
+            unreadCount = counts.unread || 0;
+        } catch { /* sidebar still renders without the badge */ }
 
         // Unit name badge at top of sidebar
         const unitBadge = unitId && unitName ? `
@@ -69,13 +76,14 @@ async function initStudentNav({ activeItem, pageTitle }) {
         let html = unitBadge;
 
         STUDENT_NAV_ITEMS.forEach((item, i) => {
-            // Add a thin divider between Home and Dashboard
             if (i === 1) {
                 html += `<div style="height:1px;background:#e8f0fb;margin:6px 0"></div>`;
             }
 
-            const href     = item.noUnit ? item.href : (unitId ? `${item.href}?unitId=${unitId}` : '#');
-            const disabled = !item.noUnit && !unitId;
+            const free     = item.noUnit || item.optionalUnit;
+            const href     = item.noUnit ? item.href
+                           : (unitId ? `${item.href}?unitId=${unitId}` : (free ? item.href : '#'));
+            const disabled = !free && !unitId;
             const isActive = item.key === activeItem;
             const isDone   = item.stage ? progress[item.stage] == 1 : null;
 
@@ -87,22 +95,25 @@ async function initStudentNav({ activeItem, pageTitle }) {
                     display: inline-block; margin-left: auto;
                 "></span>` : '';
 
+            const badge = (item.key === 'notifications' && unreadCount > 0)
+                ? `<span class="t-nav-badge">${unreadCount}</span>` : '';
+
             if (isActive) {
                 html += `
                     <button class="t-snav-active" style="display:flex;align-items:center;gap:6px">
-                        ${item.label}${dot}
+                        ${item.label}${dot}${badge}
                     </button>`;
             } else if (disabled) {
                 html += `
                     <span class="t-snav-link t-snav-disabled"
                           style="display:flex;align-items:center;gap:6px">
-                        ${item.label}${dot}
+                        ${item.label}${dot}${badge}
                     </span>`;
             } else {
                 html += `
                     <a class="t-snav-link" href="${href}"
                        style="display:flex;align-items:center;gap:6px">
-                        ${item.label}${dot}
+                        ${item.label}${dot}${badge}
                     </a>`;
             }
         });

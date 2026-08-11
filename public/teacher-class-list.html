@@ -154,7 +154,7 @@
 <div class="t-dashboard-layout">
     <nav class="t-sidebar-nav" id="teacher-sidebar"></nav>
 
-    <main class="t-dash-content">
+    <main class="t-dash-content" style="display:block">
         <div class="cl-search-row">
             <input id="search-input" class="cl-search-input" type="text"
                    placeholder="Search by name or student ID…" oninput="applyFilters()">
@@ -337,13 +337,22 @@
             { key: 'team-formation', label: 'Team Formation', href: '/teacher-team-formation.html' },
             { key: 'class-list',     label: 'Class List',     href: '/teacher-class-list.html' },
             { key: 'announcements',  label: 'Announcements',  href: '/teacher-announcements.html' },
+            { key: 'notifications',  label: 'Notifications',  href: '/teacher-notifications.html' },
         ];
         nav.innerHTML = items.map(item => {
             const href = item.noUnit ? item.href : (unitId ? `${item.href}?unitId=${unitId}` : '#');
             if (item.key === active)
-                return `<button class="t-snav-active">${item.label}</button>`;
-            return `<a class="t-snav-link" href="${href}">${item.label}</a>`;
+                return `<button class="t-snav-active" id="tsn-${item.key}" style="display:flex;align-items:center;gap:6px">${item.label}</button>`;
+            return `<a class="t-snav-link" href="${href}" id="tsn-${item.key}" style="display:flex;align-items:center;gap:6px">${item.label}</a>`;
         }).join('');
+
+        // Unread notification count badge (non-blocking)
+        fetch('/api/notifications/count').then(r => r.json()).then(counts => {
+            const unread = counts.unread || 0;
+            if (!unread) return;
+            const el = document.getElementById('tsn-notifications');
+            if (el) el.insertAdjacentHTML('beforeend', `<span class="t-nav-badge">${unread}</span>`);
+        }).catch(() => {});
     }
 
     async function doLogout() {

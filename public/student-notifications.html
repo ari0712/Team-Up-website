@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notifications - TeamUp</title>
+    <link rel="icon" type="image/png" href="teamup-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Ramabhadra&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="style1.css">
+    <link rel="stylesheet" href="teacher-style.css">
+</head>
+<body class="t-page">
+
+<header class="t-header">
+    <button class="t-logout-btn" onclick="studentLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">Notifications</h1>
+        <p>Welcome, <span id="welcome-name"></span>!</p>
+    </div>
+    <a class="logo" href="#">
+        <img class="logo-icon" src="teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span>
+    </a>
+</header>
+
+<div class="t-dashboard-layout">
+    <nav class="t-sidebar-nav" id="student-sidebar"></nav>
+
+    <main class="t-dash-content" style="display:block">
+        <div class="n-toolbar">
+            <select id="n-unit-filter" class="n-chip" style="display:none"></select>
+            <span id="n-header-count" style="font-size:13px;font-weight:700;color:#3a5070"></span>
+            <span class="n-toolbar-spacer"></span>
+            <button class="n-text-btn" id="n-mark-all" onclick="NotificationFeed.markAll()">Mark all as read</button>
+            <button class="n-text-btn" onclick="NotificationFeed.load()">Refresh</button>
+        </div>
+
+        <div id="n-chips" class="n-toolbar"></div>
+
+        <div id="n-list">
+            <div class="n-empty"><strong>Loading…</strong>Checking for updates.</div>
+        </div>
+    </main>
+
+    <div class="t-vert-divider"></div>
+
+    <aside class="t-progress-aside">
+        <h2 class="t-progress-heading">Email Notifications</h2>
+
+        <div class="n-email-card">
+            <h3>Your sign-up email</h3>
+            <p class="n-email-sub">Updates are emailed to the address you registered with.</p>
+            <div class="n-email-address" id="n-signup-email">…</div>
+
+            <div class="n-field">
+                <label for="n-email-override">Send to a different address (optional)</label>
+                <input type="email" id="n-email-override" placeholder="leave blank to use sign-up email">
+            </div>
+
+            <p class="n-email-sub" style="margin-bottom:10px">
+                Currently delivering to: <strong id="n-deliver-to">—</strong>
+            </p>
+
+            <button class="t-view-progress-btn" style="width:100%;padding:10px" onclick="EmailPanel.save()">Save</button>
+
+            <p class="n-msg" id="n-email-msg"></p>
+        </div>
+    </aside>
+</div>
+
+<script src="api.js"></script>
+<script src="student-nav.js"></script>
+<script src="notifications.js"></script>
+<script>
+    (async () => {
+        const nav = await initStudentNav({ activeItem: 'notifications', pageTitle: 'Notifications' });
+        if (!nav) return;
+
+        await NotificationFeed.init({
+            unitId: nav.unitId,
+            emptyText: 'Deadline reminders, team invites, teacher announcements and your outstanding ' +
+                       'team-formation steps will appear here.',
+            categories: [
+                { key: 'deadline', label: 'Deadlines' },
+                { key: 'invite',   label: 'Team Invites' },
+                { key: 'teacher',  label: 'From Teacher' },
+                { key: 'progress', label: 'My Progress' }
+            ]
+        });
+
+        await EmailPanel.init();
+    })();
+</script>
+</body>
+</html>

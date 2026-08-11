@@ -164,6 +164,37 @@ async function initDb() {
     FOREIGN KEY (unit_id) REFERENCES units(unit_id)
   )`);
 
+  // ── NOTIFICATIONS: which derived notifications a user has read ─
+  db.run(`CREATE TABLE IF NOT EXISTS notification_reads (
+    username   TEXT NOT NULL,
+    notif_key  TEXT NOT NULL,
+    read_at    TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (username, notif_key)
+  )`);
+
+  // ── NOTIFICATIONS: per-user email delivery settings ────────────
+  // email_override is optional — blank means "use the signup email"
+  db.run(`CREATE TABLE IF NOT EXISTS notification_prefs (
+    username       TEXT PRIMARY KEY,
+    email_enabled  INTEGER DEFAULT 1,
+    email_override TEXT DEFAULT '',
+    min_severity   TEXT DEFAULT 'INFO',
+    last_digest_at TEXT DEFAULT ''
+  )`);
+
+  // ── NOTIFICATIONS: outbound email log; also de-dupes sends ─────
+  db.run(`CREATE TABLE IF NOT EXISTS notification_emails (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    username  TEXT NOT NULL,
+    email     TEXT NOT NULL,
+    notif_key TEXT NOT NULL,
+    subject   TEXT NOT NULL DEFAULT '',
+    body      TEXT NOT NULL DEFAULT '',
+    sent_at   TEXT NOT NULL DEFAULT '',
+    status    TEXT NOT NULL DEFAULT 'LOGGED',
+    UNIQUE(username, notif_key)
+  )`);
+
   save();
   return db;
 }
