@@ -165,6 +165,7 @@
 <footer class="t-footer">High Fidelity Design Concept.</footer>
 
 <script src="/assets/js/api.js"></script>
+<script src="/assets/js/teacher-nav.js"></script>
 <script>
     const params = new URLSearchParams(location.search);
     const unitId = params.get('unitId');
@@ -215,24 +216,6 @@
             document.getElementById('ann-content').value = '';
             await loadHistory();
         } catch(e) { errEl.textContent = e.message; }
-    }
-
-    function buildTeacherSidebar(active) {
-        const nav = document.getElementById('teacher-sidebar');
-        const items = [
-            { key: 'home',           label: 'Home',           href: '/teacher/home.html',             noUnit: true },
-            { key: 'dashboard',      label: 'Dashboard',      href: '/teacher/dashboard.html' },
-            { key: 'team-formation', label: 'Team Formation', href: '/teacher/team-formation.html' },
-            { key: 'class-list',     label: 'Class List',     href: '/teacher/class-list.html' },
-            { key: 'announcements',  label: 'Announcements',  href: '/teacher/announcements.html' },
-            { key: 'export',         label: 'Export',         href: '/teacher/export.html' },
-        ];
-        nav.innerHTML = items.map(item => {
-            const href = item.noUnit ? item.href : (unitId ? `${item.href}?unitId=${unitId}` : '#');
-            if (item.key === active)
-                return `<button class="t-snav-active">${item.label}</button>`;
-            return `<a class="t-snav-link" href="${href}">${item.label}</a>`;
-        }).join('');
     }
 
     async function doLogout() {

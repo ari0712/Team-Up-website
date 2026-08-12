@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeamUp – Notifications</title>
+    <link rel="stylesheet" href="/assets/css/style1.css">
+    <link rel="stylesheet" href="/assets/css/teacher-style.css">
+    <style>
+        body.t-page { min-height: 100vh; height: auto; overflow: visible; }
+        .t-dashboard-layout { min-height: auto; }
+        .t-dash-content { overflow: visible; }
+
+        /* Inbox — deliberately the same visual language as the student page. */
+        .s-card { background:#fff;border-radius:14px;padding:22px 24px;border:1.5px solid #d0dff0;margin-bottom:16px }
+        .s-note-head {
+            display:flex; align-items:center; justify-content:space-between;
+            gap:12px; flex-wrap:wrap; margin-bottom:14px;
+        }
+        .s-note-head h3 { font-size:17px; font-weight:800; }
+        .s-note-count {
+            background:#e94560; color:#fff; font-size:12px; font-weight:700;
+            padding:2px 8px; border-radius:20px; margin-left:8px;
+        }
+        /* Category tabs. Each carries its own unread count on the right. */
+        .s-tabs {
+            display:flex; flex-wrap:wrap; gap:8px;
+            border-bottom:1.5px solid #e8f0fb; padding-bottom:12px; margin-bottom:6px;
+        }
+        .s-tab {
+            display:inline-flex; align-items:center; gap:8px;
+            background:#fff; border:1.5px solid #d0dff0; border-radius:20px;
+            padding:6px 14px; font-size:13px; font-weight:700; color:#5a6b85;
+            cursor:pointer; font-family:inherit;
+        }
+        .s-tab:hover { background:#f7fbff; color:#2663ff; }
+        .s-tab[aria-selected="true"] {
+            background:#eff4ff; border-color:#2663ff; color:#2663ff;
+        }
+        .s-tab-count {
+            background:#e94560; color:#fff; font-size:11px; font-weight:800;
+            padding:1px 7px; border-radius:20px; min-width:18px; text-align:center;
+        }
+        .s-tab[aria-selected="true"] .s-tab-count { background:#2663ff; }
+
+        .s-note-row {
+            display:flex; align-items:flex-start; gap:12px;
+            padding:12px 0; border-bottom:1px solid #f0f0f0;
+        }
+        .s-note-row:last-child { border-bottom:none; }
+        .s-note-dot {
+            width:9px; height:9px; border-radius:50%; flex-shrink:0; margin-top:6px;
+            background:#e94560;
+        }
+        .s-note-dot.read { background:#e0e8f0; }
+        .s-note-body { flex:1; min-width:0; }
+        .s-note-title { font-size:14px; font-weight:700; color:#1a2a4a; }
+        .s-note-title.read { font-weight:600; color:#5a6b85; }
+        .s-note-text { font-size:13px; color:#666; margin-top:3px; line-height:1.5; }
+        .s-note-meta { font-size:12px; color:#999; margin-top:4px; }
+        .s-note-type {
+            font-size:11px; font-weight:800; letter-spacing:.4px; text-transform:uppercase;
+            padding:2px 8px; border-radius:20px; background:#eff4ff; color:#2663ff;
+        }
+        .s-note-type.deadline        { background:#fff0f3; color:#e94560; }
+        .s-note-type.review_pending  { background:#fff7e6; color:#b45309; }
+        .s-note-type.unformed        { background:#fff7e6; color:#b45309; }
+        .s-note-type.needs_attention { background:#fff0f3; color:#e94560; }
+        .s-note-type.complete        { background:#e7f9ee; color:#16a34a; }
+        .s-note-sev {
+            font-size:11px; font-weight:800; letter-spacing:.4px;
+            padding:2px 8px; border-radius:20px; background:#f0f4f8; color:#5a7a9a;
+        }
+        .s-note-sev.WARNING  { background:#fff7e6; color:#b45309; }
+        .s-note-sev.CRITICAL { background:#fdf3f3; color:#a82f2f; }
+        .s-note-actions { display:flex; gap:8px; flex-shrink:0; }
+        .s-note-btn {
+            background:#fff; color:#2663ff; border:1.5px solid #2663ff;
+            border-radius:8px; padding:5px 12px; font-size:12px; font-weight:700; cursor:pointer;
+        }
+        .s-note-btn:hover { background:#eff4ff; }
+        .s-note-btn.muted { color:#888; border-color:#d0dff0; }
+        .s-note-empty {
+            background:#f7fbff; border:1.5px dashed #a9c8dc; border-radius:8px;
+            padding:18px; color:#5a7a9a; font-size:14px; font-weight:600; text-align:center;
+        }
+
+        /* Email preferences panel */
+        .n-email-card {
+            background:#fff; border:1.5px solid #d0dff0; border-radius:12px;
+            padding:18px 18px 16px; margin-bottom:16px;
+        }
+        .n-email-card h3 { font-size:15px; font-weight:800; color:#1a2a4a; margin-bottom:4px; }
+        .n-email-sub { font-size:12px; color:#5a7a9a; line-height:1.5; margin-bottom:10px; }
+        .n-email-address {
+            font-size:13px; font-weight:700; color:#2663ff; word-break:break-all;
+            background:#eff4ff; border-radius:8px; padding:8px 10px; margin-bottom:14px;
+        }
+        .n-toggle {
+            display:flex; align-items:center; gap:8px; font-size:13px;
+            font-weight:700; color:#1a2a4a; margin-bottom:14px; cursor:pointer;
+        }
+        .n-field { margin-bottom:14px; }
+        .n-field label {
+            display:block; font-size:12px; font-weight:700;
+            color:#3a5070; margin-bottom:5px;
+        }
+        .n-field input, .n-field select {
+            width:100%; padding:8px 10px; font-size:13px;
+            border:1.5px solid #d0dff0; border-radius:8px; background:#fff;
+        }
+        .n-msg { font-size:12px; margin-top:10px; min-height:16px; font-weight:700; }
+        .n-msg.ok  { color:#16a34a; }
+        .n-msg.err { color:#e94560; }
+    </style>
+</head>
+<body class="t-page">
+
+<header class="t-header">
+    <button class="t-logout-btn" onclick="doLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">Notifications</h1>
+        <p>Welcome, <span id="teacherName"></span>!</p>
+    </div>
+    <a class="logo" href="#">
+        <img class="logo-icon" src="/assets/img/teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span>
+    </a>
+</header>
+
+<div class="t-dashboard-layout">
+    <nav class="t-sidebar-nav" id="teacher-sidebar"></nav>
+
+    <main class="t-dash-content">
+        <div class="s-card">
+            <div class="s-note-head">
+                <h3>🔔 Notifications <span id="unread-badge" class="s-note-count" style="display:none"></span></h3>
+                <div class="s-note-actions">
+                    <!-- Unit-wide, not scoped to the visible tab. -->
+                    <button class="s-note-btn muted" id="read-all-btn" onclick="readAll()" style="display:none">Mark all read</button>
+                    <button class="s-note-btn muted" onclick="load()">Refresh</button>
+                </div>
+            </div>
+            <div class="s-tabs" id="notes-tabs" role="tablist" aria-label="Notification categories"></div>
+            <div id="notes-list"><p style="color:#888;font-size:14px">Loading…</p></div>
+        </div>
+    </main>
+
+    <div class="t-vert-divider"></div>
+
+    <aside class="t-progress-aside">
+        <h2 class="t-progress-heading">Email Notifications</h2>
+
+        <div class="n-email-card">
+            <h3>Your sign-up email</h3>
+            <p class="n-email-sub">Unit updates are emailed to the address you registered with.</p>
+            <div class="n-email-address" id="n-signup-email">…</div>
+
+            <label class="n-toggle">
+                <input type="checkbox" id="n-email-enabled">
+                Email me about new updates
+            </label>
+
+            <div class="n-field">
+                <label for="n-email-override">Send to a different address (optional)</label>
+                <input type="email" id="n-email-override" placeholder="leave blank to use sign-up email">
+            </div>
+
+            <div class="n-field">
+                <label for="n-min-severity">Only email me about</label>
+                <select id="n-min-severity">
+                    <option value="INFO">Everything</option>
+                    <option value="WARNING">Warnings and above</option>
+                    <option value="CRITICAL">Urgent only</option>
+                </select>
+            </div>
+
+            <p class="n-email-sub" style="margin-bottom:10px">
+                Currently delivering to: <strong id="n-deliver-to">—</strong>
+            </p>
+
+            <button class="t-view-progress-btn" style="width:100%;padding:10px" onclick="savePrefs()">Save</button>
+
+            <p class="n-msg" id="n-email-msg"></p>
+        </div>
+
+        <button class="t-view-progress-btn"
+                onclick="window.location='/teacher/team-formation.html?unitId='+unitId">
+            Review Teams
+        </button>
+    </aside>
+</div>
+
+<footer class="t-footer">High Fidelity Design Concept.</footer>
+
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/teacher-nav.js"></script>
+<script>
+    const params = new URLSearchParams(location.search);
+    const unitId = params.get('unitId');
+
+    let notes = [];
+
+    const escapeHtml = value => String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+
+    const TYPE_LABEL = {
+        review_pending:  'Needs review',
+        deadline:        'Deadline',
+        unformed:        'Unformed',
+        needs_attention: 'Needs attention',
+        complete:        'Complete'
+    };
+
+    // Filter tabs, derived from `type` — there is no category stored on the
+    // notification itself. `complete` matches no tab on purpose: Teams is a
+    // queue of work awaiting the teacher, and an approved unit is not work.
+    // It still appears under All.
+    const CATEGORIES = [
+        { key: 'all',       label: 'All',              empty: 'Nothing yet. Teams awaiting your review, deadline reminders and unit milestones will show up here.',
+          match: () => true },
+        { key: 'deadlines', label: 'Deadlines',        empty: 'No deadline reminders for this unit.',
+          match: n => n.type === 'deadline' },
+        { key: 'teams',     label: 'Teams',            empty: 'No teams are waiting on your review.',
+          match: n => n.type === 'review_pending' },
+        { key: 'at-risk',   label: 'Students at Risk', empty: atRiskEmptyText,
+          match: n => n.type === 'unformed' || n.type === 'needs_attention' },
+    ];
+
+    let activeCategory = 'all';
+
+    // Set from the unit once loaded; null until then. The empty text has to
+    // quote the unit's own window, because a teacher who set it to "Never" and
+    // then read "reported from 3 days before the deadline" would reasonably
+    // conclude the feature was broken.
+    let atRiskDays = null;
+
+    function atRiskEmptyText() {
+        if (atRiskDays === 0) {
+            return 'Flagging is turned off for this unit. Turn it on under Edit Rules on the Dashboard.';
+        }
+        if (atRiskDays === null) return 'No students flagged.';
+        return `No students flagged. This is only reported from ${atRiskDays} `
+             + `day${atRiskDays === 1 ? '' : 's'} before the deadline.`;
+    }
+
+    function selectCategory(key) {
+        activeCategory = key;
+        render();
+    }
+
+    function renderTabs() {
+        document.getElementById('notes-tabs').innerHTML = CATEGORIES.map(c => {
+            // Unread only, matching the sidebar badge; omitted entirely at zero
+            // so a number always means there is something to look at.
+            const unread = notes.filter(n => !n.read_at && c.match(n)).length;
+            const badge = unread > 0
+                ? `<span class="s-tab-count">${unread}</span>` : '';
+            return `<button class="s-tab" role="tab"
+                            aria-selected="${c.key === activeCategory}"
+                            onclick="selectCategory('${c.key}')">${escapeHtml(c.label)}${badge}</button>`;
+        }).join('');
+    }
+
+    function whenText(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (isNaN(d)) return '';
+        const mins = Math.round((Date.now() - d) / 60000);
+        if (mins < 1)  return 'just now';
+        if (mins < 60) return `${mins} min ago`;
+        const hrs = Math.round(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        return d.toLocaleString('en-AU', { day:'numeric', month:'short', hour:'numeric', minute:'2-digit' });
+    }
+
+    async function doLogout() {
+        await post('/api/auth/logout', {});
+        window.location = '/';
+    }
+
+    (async () => {
+        const user = await requireSession('TEACHER');
+        if (!user) return;
+        document.getElementById('teacherName').textContent = user.username;
+        if (!unitId) { window.location = '/teacher/home.html'; return; }
+        buildTeacherSidebar('notifications');
+        await Promise.all([load(), loadPrefs(), loadUnitSettings()]);
+    })().catch(err => {
+        document.getElementById('notes-list').innerHTML =
+            `<div class="s-note-empty">Could not load notifications: ${escapeHtml(err.message)}</div>`;
+    });
+
+    // ── Inbox ───────────────────────────────────────────────────────
+    async function load() {
+        notes = await get(`/api/teacher/units/${unitId}/notifications`);
+        render();
+    }
+
+    // Non-blocking: the inbox must still render if this fails, so a failure
+    // only costs the precise wording of the at-risk empty state.
+    async function loadUnitSettings() {
+        try {
+            const unit = await get(`/api/units/${unitId}`);
+            atRiskDays = unit.at_risk_days ?? 3;
+            render();
+        } catch { /* empty state falls back to its generic wording */ }
+    }
+
+    function render() {
+        const list   = document.getElementById('notes-list');
+        const unread = notes.filter(n => !n.read_at).length;
+
+        // The header badge and Mark-all-read stay unit-wide, not per-tab —
+        // both act on the whole inbox regardless of which tab is showing.
+        const badge = document.getElementById('unread-badge');
+        badge.style.display = unread ? 'inline-block' : 'none';
+        badge.textContent = unread;
+        document.getElementById('read-all-btn').style.display = unread ? 'inline-block' : 'none';
+
+        renderTabs();
+
+        const category = CATEGORIES.find(c => c.key === activeCategory) || CATEGORIES[0];
+        const visible  = notes.filter(category.match);
+
+        if (!visible.length) {
+            const empty = typeof category.empty === 'function' ? category.empty() : category.empty;
+            list.innerHTML = `<div class="s-note-empty">${escapeHtml(empty)}</div>`;
+            return;
+        }
+
+        list.innerHTML = visible.map(n => {
+            const isRead = !!n.read_at;
+            // INFO is the default and carries no useful signal, so its pill is
+            // omitted — only WARNING and CRITICAL earn the visual weight.
+            const sev = (n.severity && n.severity !== 'INFO')
+                ? `<span class="s-note-sev ${escapeHtml(n.severity)}">${escapeHtml(n.severity)}</span> · `
+                : '';
+            return `
+              <div class="s-note-row" id="note-${n.id}">
+                <div class="s-note-dot ${isRead ? 'read' : ''}"></div>
+                <div class="s-note-body">
+                  <div class="s-note-title ${isRead ? 'read' : ''}">${escapeHtml(n.title)}</div>
+                  ${n.body ? `<div class="s-note-text">${escapeHtml(n.body)}</div>` : ''}
+                  <div class="s-note-meta">
+                    ${sev}<span class="s-note-type ${escapeHtml(n.type)}">${escapeHtml(TYPE_LABEL[n.type] || n.type)}</span>
+                    · ${escapeHtml(whenText(n.created_at))}
+                  </div>
+                </div>
+                <div class="s-note-actions">
+                  ${n.link ? `<button class="s-note-btn" onclick="openNote(${n.id}, '${escapeHtml(n.link)}')">Open</button>` : ''}
+                  ${isRead ? '' : `<button class="s-note-btn muted" onclick="markRead(${n.id})">Mark read</button>`}
+                </div>
+              </div>`;
+        }).join('');
+    }
+
+    async function markRead(id) {
+        try {
+            await api('PATCH', `/api/teacher/units/${unitId}/notifications/${id}/read`);
+            await load();
+        } catch(e) { alert('Could not mark as read: ' + e.message); }
+    }
+
+    // Opening a notification implies you have seen it.
+    async function openNote(id, link) {
+        try { await api('PATCH', `/api/teacher/units/${unitId}/notifications/${id}/read`); }
+        catch(e) { console.error(e); }
+        window.location = link;
+    }
+
+    async function readAll() {
+        try {
+            await post(`/api/teacher/units/${unitId}/notifications/read-all`, {});
+            await load();
+        } catch(e) { alert('Could not mark all as read: ' + e.message); }
+    }
+
+    // ── Email preferences ───────────────────────────────────────────
+    function applyPrefs(p) {
+        document.getElementById('n-signup-email').textContent  = p.signupEmail || '(none on file)';
+        document.getElementById('n-email-enabled').checked     = p.emailEnabled;
+        document.getElementById('n-email-override').value      = p.emailOverride || '';
+        document.getElementById('n-min-severity').value        = p.minSeverity || 'INFO';
+        document.getElementById('n-deliver-to').textContent    = p.deliveringTo || '(nowhere)';
+    }
+
+    async function loadPrefs() {
+        try {
+            applyPrefs(await get('/api/teacher/notification-prefs'));
+        } catch(e) {
+            setPrefMsg('Could not load preferences: ' + e.message, 'err');
+        }
+    }
+
+    function setPrefMsg(text, kind) {
+        const el = document.getElementById('n-email-msg');
+        el.textContent = text;
+        el.className = `n-msg ${kind || ''}`;
+    }
+
+    async function savePrefs() {
+        setPrefMsg('Saving…', '');
+        try {
+            // The server returns the saved state, so the panel reflects what was
+            // actually stored rather than what was typed.
+            applyPrefs(await put('/api/teacher/notification-prefs', {
+                emailEnabled:  document.getElementById('n-email-enabled').checked,
+                emailOverride: document.getElementById('n-email-override').value,
+                minSeverity:   document.getElementById('n-min-severity').value
+            }));
+            setPrefMsg('Saved.', 'ok');
+        } catch(e) {
+            setPrefMsg(e.message, 'err');
+        }
+    }
+</script>
+</body>
+</html>

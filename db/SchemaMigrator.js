@@ -63,6 +63,14 @@ class SchemaMigrator {
     FOREIGN KEY (created_by) REFERENCES users(username)
   )`);
 
+    // How many days before the deadline the teacher wants at-risk students
+    // reported. 0 means never. Allowed values are enforced in UnitService, not
+    // here, so the rule lives with the rest of the unit validation.
+    //
+    // DEFAULT 3 is deliberate: it is what the gate was hardcoded to before this
+    // was configurable, so existing units keep behaving exactly as they did.
+    try { db.run(`ALTER TABLE units ADD COLUMN at_risk_days INTEGER NOT NULL DEFAULT 3`); } catch (e) {}
+
     // ── ADDITION 1: add deadline column to existing units table (safe if already exists)
     try { db.run(`ALTER TABLE units ADD COLUMN deadline TEXT DEFAULT ''`); } catch (e) {}
 
@@ -250,11 +258,16 @@ class SchemaMigrator {
       FOREIGN KEY (unit_id) REFERENCES units(unit_id)
     )`);
 
-    // ── Student notifications ──────────────────────────────────────
-    // Rows are produced by NotificationService.syncForUnit, which derives them
-    // from current state and inserts with INSERT OR IGNORE. The UNIQUE index on
-    // (student_id, dedupe_key) is what makes that producer idempotent, so it can
-    // run on every read and on a timer without ever duplicating a notification.
+    // ── Notifications ──────────────────────────────────────────────
+    // Rows are produced by NotificationService.syncForUnit (students) and
+    // syncTeacherForUnit (teachers), which derive them from current state and
+    // insert with INSERT OR IGNORE. The UNIQUE index on (student_id, dedupe_key)
+    // is what makes those producers idempotent, so they can run on every read
+    // and on a timer without ever duplicating a notification.
+    //
+    // `student_id` is a users.username, not a students-table key — which is why
+    // a teacher's inbox lives in this same table rather than a parallel one.
+    // recipient_role tells the two apart.
     db.run(`CREATE TABLE IF NOT EXISTS notifications (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       unit_id     TEXT NOT NULL,
@@ -273,6 +286,29 @@ class SchemaMigrator {
               ON notifications(student_id, dedupe_key)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_notifications_inbox
               ON notifications(unit_id, student_id, read_at)`);
+
+    // Added when the teacher inbox shipped — safe if the columns already exist.
+    // Both carry a DEFAULT, so existing rows backfill to exactly what they
+    // already were: a student notification of ordinary importance.
+    try { db.run(`ALTER TABLE notifications ADD COLUMN recipient_role TEXT NOT NULL DEFAULT 'STUDENT'`); } catch (e) {}
+    try { db.run(`ALTER TABLE notifications ADD COLUMN severity       TEXT NOT NULL DEFAULT 'INFO'`); } catch (e) {}
+
+    // ── Per-user email preferences ─────────────────────────────────
+    // Keyed by users.username, so it covers students and teachers alike.
+    // A missing row means "defaults" — NotificationPrefsRepository.get
+    // synthesises them rather than requiring a row to exist up front.
+    //
+    // These are the RECIPIENT's preferences and are applied before the
+    // env-level guard in dispatchEmails, never instead of it: email_override
+    // cannot be used to reach an address MAIL_ALLOWLIST forbids.
+    db.run(`CREATE TABLE IF NOT EXISTS notification_prefs (
+      username       TEXT PRIMARY KEY,
+      email_enabled  INTEGER NOT NULL DEFAULT 1,
+      email_override TEXT    NOT NULL DEFAULT '',
+      min_severity   TEXT    NOT NULL DEFAULT 'INFO',
+      updated_at     TEXT    NOT NULL DEFAULT '',
+      FOREIGN KEY (username) REFERENCES users(username)
+    )`);
 
     // Every message the app decided to send, whether or not a real transport
     // delivered it. Keeps dispatch auditable and makes "emailed exactly once"

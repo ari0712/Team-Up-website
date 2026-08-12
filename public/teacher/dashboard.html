@@ -70,6 +70,7 @@
 <footer class="t-footer">High Fidelity Design Concept.</footer>
 
 <script src="/assets/js/api.js"></script>
+<script src="/assets/js/teacher-nav.js"></script>
 <script>
     const params = new URLSearchParams(location.search);
     const unitId = params.get('unitId');
@@ -114,6 +115,12 @@
             if (u.must_share_tutorial) rules.push('All members must share at least one tutorial');
             if (u.max_new_to_qut > 0) rules.push(`Maximum ${u.max_new_to_qut} new-to-QUT students in one team`);
 
+            // ?? not ||, so a stored 0 reads as "Never" rather than the default.
+            const atRisk = u.at_risk_days ?? 3;
+            rules.push(atRisk > 0
+                ? `Students needing attention are flagged ${atRisk} day${atRisk === 1 ? '' : 's'} before the deadline`
+                : 'Students needing attention are never flagged');
+
             document.getElementById('rulesList').innerHTML = rules.map(r => `<li>✓ ${r}</li>`).join('');
             document.getElementById('editRulesBtn').onclick = () => openEditRules(u);
             document.getElementById('editDeadlineBtn').onclick = () => openEditDeadline(u);
@@ -153,25 +160,6 @@
         window.location = '/';
     }
 
-    function buildTeacherSidebar(active) {
-        const nav = document.getElementById('teacher-sidebar');
-        const items = [
-            { key: 'home',            label: 'Home',           href: '/teacher/home.html',              noUnit: true },
-            { key: 'dashboard',       label: 'Dashboard',      href: '/teacher/dashboard.html' },
-            { key: 'team-formation',  label: 'Team Formation', href: '/teacher/team-formation.html' },
-            { key: 'class-list',      label: 'Class List',     href: '/teacher/class-list.html' },
-            { key: 'announcements',   label: 'Announcements',  href: '/teacher/announcements.html' },
-            { key: 'export',          label: 'Export',         href: '/teacher/export.html' },
-        ];
-        nav.innerHTML = items.map(item => {
-            const href = item.noUnit ? item.href : (unitId ? `${item.href}?unitId=${unitId}` : '#');
-            if (item.key === active) {
-                return `<button class="t-snav-active">${item.label}</button>`;
-            }
-            return `<a class="t-snav-link" href="${href}">${item.label}</a>`;
-        }).join('');
-    }
-
     let currentUnit = null;
 
     // Stored deadline -> the value format a datetime-local input expects.
@@ -191,6 +179,8 @@
         document.getElementById('er-onegroup').checked = !!u.max_one_group;
         document.getElementById('er-tutorial').checked = !!u.must_share_tutorial;
         document.getElementById('er-deadline').value = toDatetimeLocal(u.deadline);
+        // ?? not ||, because 0 ("Never") is a real stored value.
+        document.getElementById('er-atrisk').value = String(u.at_risk_days ?? 3);
         document.getElementById('er-save-msg').textContent = '';
         document.getElementById('editRulesModal').classList.add('open');
     }
@@ -241,7 +231,8 @@
             maxNewToQut:       parseInt(document.getElementById('er-newqut').value) || 2,
             maxOneGroup:       document.getElementById('er-onegroup').checked,
             mustShareTutorial: document.getElementById('er-tutorial').checked,
-            deadline:          document.getElementById('er-deadline').value
+            deadline:          document.getElementById('er-deadline').value,
+            atRiskDays:        parseInt(document.getElementById('er-atrisk').value)
         };
         try {
             await put(`/api/units/${unitId}/rules`, payload);
@@ -361,6 +352,20 @@
         <div class="t-modal-field">
             <label>Deadline</label>
             <input type="datetime-local" id="er-deadline">
+        </div>
+        <div class="t-modal-field">
+            <label for="er-atrisk">Flag students needing attention</label>
+            <select id="er-atrisk">
+                <option value="7">7 days before the deadline</option>
+                <option value="5">5 days before the deadline</option>
+                <option value="3">3 days before the deadline</option>
+                <option value="1">1 day before the deadline</option>
+                <option value="0">Never</option>
+            </select>
+            <p style="font-size:12px;color:#5a7a9a;margin-top:6px;line-height:1.5">
+                Controls the Students at Risk notifications only. Deadline reminders
+                are unaffected.
+            </p>
         </div>
         <p id="er-save-msg" class="t-save-msg"></p>
         <div class="t-modal-actions">

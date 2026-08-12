@@ -19,6 +19,7 @@ const TeamRepository         = require('./repositories/teamRepository');
 const TutorialSlotRepository = require('./repositories/tutorialSlotRepository');
 const AnnouncementRepository = require('./repositories/announcementRepository');
 const NotificationRepository = require('./repositories/notificationRepository');
+const NotificationPrefsRepository = require('./repositories/notificationPrefsRepository');
 const EmailOutboxRepository  = require('./repositories/emailOutboxRepository');
 
 // Services
@@ -36,6 +37,7 @@ const { isLocked }         = require('./utils/deadline');
 const createAuthRouter    = require('./routes/auth');
 const createUnitsRouter   = require('./routes/units');
 const createStudentRouter = require('./routes/student');
+const createTeacherNotificationsRouter = require('./routes/teacherNotifications');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -67,6 +69,7 @@ db.connect().then(() => {
   const slots       = new TutorialSlotRepository(db);
   const announcements = new AnnouncementRepository(db);
   const notifications = new NotificationRepository(db);
+  const notifPrefs    = new NotificationPrefsRepository(db);
   const outbox        = new EmailOutboxRepository(db);
 
   const authService     = new AuthService({ userRepo, studentRepo });
@@ -74,8 +77,8 @@ db.connect().then(() => {
   const proposalService = new ProposalService({ db });
   const mailTransport = createTransport();
   const notificationService = new NotificationService({
-    db, notifications, outbox, units: unitRepo, enrollment, teams, announcements,
-    userRepo, transport: mailTransport
+    db, notifications, prefs: notifPrefs, outbox, units: unitRepo, enrollment, teams,
+    announcements, userRepo, transport: mailTransport
   });
   // Say out loud what will happen to notification email — silently mailing real
   // people because a variable was set is the failure mode worth preventing.
@@ -101,6 +104,7 @@ db.connect().then(() => {
   app.use('/api/auth',    createAuthRouter({ userRepo, authService, studentService }));
   app.use('/api/units',   createUnitsRouter({ unitService, matchingService }));
   app.use('/api/student', createStudentRouter({ studentPortalService }));
+  app.use('/api/teacher', createTeacherNotificationsRouter({ notificationService, unitRepo }));
 
   // An unmatched /api route must NOT fall through to the SPA catch-all below.
   // Serving index.html with a 200 makes a missing endpoint look like a

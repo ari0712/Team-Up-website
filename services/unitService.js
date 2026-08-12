@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const ServiceError = require('./ServiceError');
 const { parseTeamSizesCsv } = require('../utils/teamSizes');
 const { validateTeam } = require('../utils/teamValidator');
+const { AT_RISK_CHOICES, AT_RISK_DEFAULT } = require('./notificationService');
 
 // CSV-field helpers for the tutorial-slot cascade rename / delete.
 function csvReplace(csv, oldLabel, newLabel) {
@@ -250,17 +251,31 @@ class UnitService {
 
   updateRules(unitId, teacherId, body) {
     const unit = this._ownedOr404(unitId, teacherId);
-    const { validTeamSizes, maxOneGroup, mustShareTutorial, maxNewToQut, deadline } = body;
+    const { validTeamSizes, maxOneGroup, mustShareTutorial, maxNewToQut, deadline,
+            atRiskDays } = body;
 
     if (validTeamSizes !== undefined && parseTeamSizesCsv(validTeamSizes) === null)
       throw new ServiceError('validTeamSizes must be comma-separated positive integers', 400);
+
+    // Only the offered choices are storable. 0 is a real value here ("never"),
+    // so this is checked explicitly rather than relying on truthiness — the
+    // deadline-only save path below would otherwise turn "never" back into 3.
+    let resolvedAtRisk = unit.at_risk_days ?? AT_RISK_DEFAULT;
+    if (atRiskDays !== undefined && atRiskDays !== null && atRiskDays !== '') {
+      const n = parseInt(atRiskDays);
+      if (!AT_RISK_CHOICES.includes(n))
+        throw new ServiceError(
+          `atRiskDays must be one of ${AT_RISK_CHOICES.join(', ')}`, 400);
+      resolvedAtRisk = n;
+    }
 
     this.units.updateRules(unitId, {
       validTeamSizes:    validTeamSizes || unit.valid_team_sizes,
       maxOneGroup:       maxOneGroup       !== undefined ? (maxOneGroup ? 1 : 0)       : unit.max_one_group,
       mustShareTutorial: mustShareTutorial !== undefined ? (mustShareTutorial ? 1 : 0) : unit.must_share_tutorial,
       maxNewToQut:       parseInt(maxNewToQut) || unit.max_new_to_qut,
-      deadline:          deadline || unit.deadline
+      deadline:          deadline || unit.deadline,
+      atRiskDays:        resolvedAtRisk
     });
     return { ok: true };
   }
