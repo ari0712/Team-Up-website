@@ -85,6 +85,34 @@ class SchemaMigrator {
     FOREIGN KEY (unit_id) REFERENCES units(unit_id)
   )`);
 
+    // ── Unit roster: WHO IS ALLOWED to join a unit ─────────────────
+    // Deliberately separate from unit_students, which means "actually enrolled"
+    // and is INNER JOINed by teams, classmates, notifications and more. Keeping
+    // the allowlist in its own table means none of those readers can
+    // accidentally pick up someone who was merely invited.
+    //
+    // Matching is by email, lowercased on write and on lookup. A unit with no
+    // roster rows matches nobody, so it is closed until a teacher adds a list.
+    db.run(`CREATE TABLE IF NOT EXISTS unit_roster (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      unit_id          TEXT NOT NULL,
+      email            TEXT NOT NULL,
+      name             TEXT DEFAULT '',
+      student_number   TEXT DEFAULT '',
+      tutorial_time    TEXT DEFAULT '',
+      is_new_to_qut    INTEGER DEFAULT 0,
+      degree           TEXT DEFAULT '',
+      major            TEXT DEFAULT '',
+      minor            TEXT DEFAULT '',
+      units_passed     INTEGER DEFAULT 0,
+      it_skill_groups  TEXT DEFAULT '',
+      invited_at       TEXT DEFAULT '',
+      UNIQUE(unit_id, email),
+      FOREIGN KEY (unit_id) REFERENCES units(unit_id)
+    )`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_unit_roster_email ON unit_roster(email)`);
+    this.backfillRosterFromEnrolments();
+
     // ── ADDITION 3: 4-stage progress tracking per student per unit
     db.run(`CREATE TABLE IF NOT EXISTS student_progress (
     unit_id              TEXT NOT NULL,
@@ -160,6 +188,11 @@ class SchemaMigrator {
       FOREIGN KEY (source_team_id) REFERENCES unit_teams(team_id),
       FOREIGN KEY (target_team_id) REFERENCES unit_teams(team_id)
     )`);
+    // Who actually merged, recorded when a proposal is auto-cancelled. Both
+    // sides of a cancelled proposal see it, so the row can only be phrased
+    // correctly if it knows which side went away — and that is unrecoverable
+    // afterwards, because the losing team row is deleted by then.
+    try { db.run(`ALTER TABLE proposals ADD COLUMN cancelled_by_student_ids TEXT`); } catch (e) {}
     db.run(`CREATE INDEX IF NOT EXISTS idx_proposals_unit_state ON proposals(unit_id, state)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_proposals_expires ON proposals(state, expires_at)`);
 
@@ -216,6 +249,95 @@ class SchemaMigrator {
       created_at TEXT NOT NULL DEFAULT '',
       FOREIGN KEY (unit_id) REFERENCES units(unit_id)
     )`);
+
+    // ── Student notifications ──────────────────────────────────────
+    // Rows are produced by NotificationService.syncForUnit, which derives them
+    // from current state and inserts with INSERT OR IGNORE. The UNIQUE index on
+    // (student_id, dedupe_key) is what makes that producer idempotent, so it can
+    // run on every read and on a timer without ever duplicating a notification.
+    db.run(`CREATE TABLE IF NOT EXISTS notifications (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      unit_id     TEXT NOT NULL,
+      student_id  TEXT NOT NULL,
+      type        TEXT NOT NULL DEFAULT '',
+      title       TEXT NOT NULL DEFAULT '',
+      body        TEXT NOT NULL DEFAULT '',
+      link        TEXT NOT NULL DEFAULT '',
+      dedupe_key  TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT '',
+      read_at     TEXT,
+      emailed_at  TEXT,
+      FOREIGN KEY (unit_id) REFERENCES units(unit_id)
+    )`);
+    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe
+              ON notifications(student_id, dedupe_key)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_notifications_inbox
+              ON notifications(unit_id, student_id, read_at)`);
+
+    // Every message the app decided to send, whether or not a real transport
+    // delivered it. Keeps dispatch auditable and makes "emailed exactly once"
+    // a checkable property.
+    db.run(`CREATE TABLE IF NOT EXISTS email_outbox (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      notification_id INTEGER,
+      recipient       TEXT NOT NULL DEFAULT '',
+      subject         TEXT NOT NULL DEFAULT '',
+      body            TEXT NOT NULL DEFAULT '',
+      status          TEXT NOT NULL DEFAULT 'queued',
+      error           TEXT,
+      created_at      TEXT NOT NULL DEFAULT '',
+      sent_at         TEXT,
+      FOREIGN KEY (notification_id) REFERENCES notifications(id)
+    )`);
+    // Added after the outbox shipped — safe if the columns already exist.
+    // intended_recipient records who a message was really for when
+    // MAIL_REDIRECT_TO rewrote the envelope; preview_url holds the Ethereal
+    // link so a send can be opened and inspected.
+    try { db.run(`ALTER TABLE email_outbox ADD COLUMN intended_recipient TEXT`); } catch (e) {}
+    try { db.run(`ALTER TABLE email_outbox ADD COLUMN preview_url TEXT`); } catch (e) {}
+  }
+
+  // One-shot migration: everyone already enrolled becomes rostered.
+  //
+  // Without this, turning on closed-by-default would lock every existing
+  // student out of the unit they are already in — units created before the
+  // roster existed have no allowlist at all.
+  //
+  // Idempotent by the same rule migrateToProposalModel uses: short-circuit as
+  // soon as any roster row exists anywhere, so a teacher's later edits are
+  // never undone by a restart.
+  backfillRosterFromEnrolments() {
+    const db = this.db;
+    const guard = db.prepare(`SELECT COUNT(*) AS n FROM unit_roster`);
+    guard.step();
+    const already = guard.getAsObject().n;
+    guard.free();
+    if (already > 0) return 0;
+
+    const now = new Date().toISOString();
+    db.run(
+      `INSERT OR IGNORE INTO unit_roster
+         (unit_id, email, name, student_number, tutorial_time, is_new_to_qut,
+          degree, major, minor, units_passed, it_skill_groups, invited_at)
+       SELECT us.unit_id,
+              LOWER(TRIM(u.email)),
+              us.name,
+              COALESCE(u.student_id, ''),
+              us.tutorial_time, us.is_new_to_qut,
+              us.degree, us.major, us.minor, us.units_passed, us.it_skill_groups,
+              ?
+         FROM unit_students us
+         INNER JOIN users u ON u.username = us.student_id
+        WHERE TRIM(COALESCE(u.email, '')) <> ''`,
+      [now]
+    );
+
+    const after = db.prepare(`SELECT COUNT(*) AS n FROM unit_roster`);
+    after.step();
+    const n = after.getAsObject().n;
+    after.free();
+    if (n > 0) console.log(`Roster backfill: ${n} existing enrolments granted access`);
+    return n;
   }
 
   // One-shot migration: existing PENDING unit_team_invites → proposals,

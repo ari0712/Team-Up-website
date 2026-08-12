@@ -16,6 +16,24 @@
         .s-match-reasons span { display:block }
         .s-match-percent { font-size:14px;font-weight:700;text-align:right;color:#1a2a4a;margin-bottom:8px }
         .s-invite-row { display:flex;gap:10px;margin-top:12px }
+
+        /* ── Auto-Match shortlist ── */
+        .am-panel { background:#eef4fb;border:1.5px solid #b9d2ec;border-radius:12px;padding:18px 20px;margin-bottom:16px }
+        .am-head { display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap }
+        .am-head h3 { font-size:18px;font-weight:800;color:#1a2a4a;margin:0 }
+        .am-sub { font-size:12.5px;color:#5a7a9a;margin:4px 0 14px }
+        .am-back { background:none;border:none;color:#2663ff;font-weight:700;font-size:13px;cursor:pointer;padding:0 }
+        .am-card { background:#fff;border:1.5px solid #d0dff0;border-radius:10px;padding:14px 16px;margin-bottom:10px;display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap }
+        .am-card.am-best { border-color:#2663ff;border-width:2px }
+        .am-rank { font-size:13px;font-weight:800;color:#5a7a9a }
+        .am-names { font-size:16px;font-weight:800;color:#1a2a4a;margin:2px 0 6px }
+        .am-badge { display:inline-block;font-size:11px;font-weight:800;border-radius:999px;padding:2px 9px;margin-left:8px;vertical-align:middle }
+        .am-badge-fit  { background:#d1e7dd;color:#0a3622 }
+        .am-badge-part { background:#fdf1d6;color:#6b4c00 }
+        .am-why { font-size:13px;color:#555;line-height:1.75;margin:0 }
+        .am-why li { list-style:none }
+        .am-why li::before { content:'·';margin-right:7px;color:#8aabbf }
+        .am-empty { font-size:14px;color:#5a5a5a;line-height:1.6 }
     </style>
 </head>
 <body class="t-page">
@@ -54,8 +72,10 @@
         </div>
         <div style="margin-bottom:18px">
             <p style="font-size:14px;font-weight:600;margin-bottom:8px">Not sure who to choose?</p>
-            <button class="t-open-btn" style="width:180px;background:#1a2a4a" onclick="alert('Auto-match coming soon!')">Auto-Match Me</button>
+            <button id="automatch-btn" class="t-open-btn" style="width:180px;background:#1a2a4a"
+                    onclick="autoMatch()">Auto-Match Me</button>
         </div>
+        <div id="automatch-panel" style="display:none"></div>
         <div id="student-list"><p style="color:#888">Loading…</p></div>
     </div>
 </div>
@@ -63,7 +83,7 @@
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/student-nav.js"></script>
 <script>
-    let allStudents = [], unitId;
+    let allStudents = [], unitId, locked = false;
 
     (async () => {
         const nav = await initStudentNav({ activeItem:'find-teammates', pageTitle:'Find Teammates' });
@@ -82,8 +102,32 @@
         } catch(e) { console.error('Could not load tutorial slots:', e); }
 
         // Every enrolled student is on a team-of-1, so we don't need to fetch it here.
-        allStudents = await get(`/api/student/units/${unitId}/students`);
+        // available=1 hides students whose team has been submitted for teacher
+        // approval (or already approved) — they cannot be merged with, so
+        // offering them here would only produce a failed proposal.
+        // Merge requests are refused once the deadline passes, so disable them
+        // here rather than letting every click come back 403.
+        try {
+            const unit = await get(`/api/student/units/${unitId}`);
+            locked = isUnitLocked(unit);
+        } catch { /* leave unlocked; the server still enforces it */ }
+        if (locked) {
+            document.getElementById('student-list')
+                .insertAdjacentHTML('beforebegin', lockedBannerHtml());
+            const btn = document.getElementById('automatch-btn');
+            btn.disabled = true;
+            btn.style.background = '#aaa';
+            btn.style.cursor = 'not-allowed';
+            btn.title = 'The deadline has passed';
+            btn.textContent = 'Formation closed';
+        }
+
+        allStudents = await get(`/api/student/units/${unitId}/students?available=1`);
         renderStudents(allStudents);
+
+        // The dashboard's Auto-Match button links here with ?automatch=1 rather
+        // than duplicating the whole panel on that page.
+        if (!locked && new URLSearchParams(location.search).get('automatch')) autoMatch();
     })();
 
     function filterStudents() {
@@ -119,7 +163,10 @@
           <div class="s-invite-row">
             <button class="t-open-btn" style="width:140px;background:#fff;color:#2663ff;border:1.5px solid #2663ff"
               onclick="viewProfile('${s.student_id}')">View Profile</button>
-            ${s.team_id
+            ${locked
+                ? `<button class="t-open-btn" style="width:140px;background:#aaa;cursor:not-allowed" disabled
+                     title="The deadline has passed">Formation closed</button>`
+                : s.team_id
                 ? `<button class="t-open-btn" style="width:140px" onclick="proposeMerge('${s.team_id}')">Propose Merge</button>`
                 : `<button class="t-open-btn" style="width:140px;background:#aaa;cursor:not-allowed" disabled>No team yet</button>`
             }
@@ -127,6 +174,61 @@
         </div>
       </div>`;
         }).join('');
+    }
+
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c =>
+        ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[c]));
+
+    // Ranked merge suggestions. The server does the ranking with the same scorer
+    // the teacher matcher uses; this only renders it. Sending stays a deliberate
+    // click — Auto-Match never proposes on the student's behalf.
+    async function autoMatch() {
+        const panel = document.getElementById('automatch-panel');
+        panel.style.display = 'block';
+        panel.innerHTML = '<div class="am-panel"><p class="am-why">Finding teams that fit…</p></div>';
+        try {
+            const r = await get(`/api/student/units/${unitId}/auto-match`);
+            renderAutoMatch(r);
+        } catch (e) {
+            panel.innerHTML = `<div class="am-panel"><p class="am-empty">Could not build suggestions: ${esc(e.message)}</p>
+                <button class="am-back" onclick="closeAutoMatch()">← Back to all students</button></div>`;
+        }
+    }
+
+    function closeAutoMatch() {
+        const panel = document.getElementById('automatch-panel');
+        panel.style.display = 'none';
+        panel.innerHTML = '';
+    }
+
+    function renderAutoMatch(r) {
+        const list = (r.suggestions || []);
+        const cards = list.map((s, i) => `
+            <div class="am-card${i === 0 ? ' am-best' : ''}">
+              <div style="flex:1;min-width:220px">
+                <div class="am-rank">${i + 1}${i === 0 ? ' · best fit' : ''}</div>
+                <div class="am-names">${esc(s.members.map(m => m.name || m.student_id).join(', '))}
+                  <span class="am-badge ${s.sizeValid ? 'am-badge-fit' : 'am-badge-part'}">
+                    ${s.sizeValid ? 'complete team' : 'partial'}</span>
+                </div>
+                <ul class="am-why">${s.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+              </div>
+              <div>
+                <button class="t-open-btn" style="width:150px"
+                        onclick="proposeMerge('${esc(s.team_id)}')">Send request</button>
+              </div>
+            </div>`).join('');
+
+        document.getElementById('automatch-panel').innerHTML = `
+            <div class="am-panel">
+              <div class="am-head">
+                <h3>Suggested teams</h3>
+                <button class="am-back" onclick="closeAutoMatch()">← Back to all students</button>
+              </div>
+              <p class="am-sub">Ranked by shared tutorial time, then role variety, then shared interests.
+                 Teams need ${esc(r.valid_team_sizes)} members. Sending a request still needs them to accept.</p>
+              ${list.length ? cards : `<p class="am-empty">${esc(r.why_empty || 'No suitable teams right now.')}</p>`}
+            </div>`;
     }
 
     async function proposeMerge(targetTeamId) {

@@ -41,6 +41,44 @@
         }
         .ex-stat-label { font-size: 12px; color: #666; font-weight: 600; }
         .ex-stat-value { font-size: 22px; color: #1a2a4a; font-weight: 800; margin-top: 2px; }
+
+        /* ── Needs Attention ────────────────────────────────────────────────
+           Status steps are the fixed status palette (critical / serious /
+           good). On a light surface `serious` is below 3:1 by design, so every
+           chip carries an ICON AND A TEXT LABEL — colour never carries the
+           meaning on its own. */
+        .att-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+        .att-kpi { border-radius: 10px; padding: 12px 14px; border: 1.5px solid; background: #fff; }
+        .att-kpi-label { font-size: 12px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+        .att-kpi-value { font-size: 26px; font-weight: 800; color: #1a2a4a; margin-top: 2px; line-height: 1.1; }
+        .att-kpi.critical { border-color: #d03b3b; }
+        .att-kpi.critical .att-kpi-label { color: #a82f2f; }
+        .att-kpi.serious  { border-color: #ec835a; }
+        .att-kpi.serious  .att-kpi-label { color: #a8542f; }
+        .att-kpi.good     { border-color: #0ca30c; }
+        .att-kpi.good     .att-kpi-label { color: #0a7d0a; }
+
+        .att-chip {
+            display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+            font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 20px;
+        }
+        .att-chip.critical { background: #fbe9e9; color: #a82f2f; }
+        .att-chip.serious  { background: #fdefe7; color: #a8542f; }
+
+        /* Team size against the unit's minimum — a ratio against a limit. */
+        .att-meter { display: flex; align-items: center; gap: 8px; }
+        .att-meter-track {
+            width: 74px; height: 7px; border-radius: 20px; background: #e8eef7;
+            overflow: hidden; flex-shrink: 0;
+        }
+        .att-meter-fill { height: 100%; border-radius: 20px; background: #d03b3b; }
+        .att-meter-fill.serious { background: #ec835a; }
+        .att-meter-text { font-size: 12px; color: #555; font-variant-numeric: tabular-nums; }
+
+        .att-empty {
+            background: #eefaee; border: 1.5px solid #0ca30c; border-radius: 10px;
+            padding: 16px 18px; color: #0a7d0a; font-size: 14px; font-weight: 700;
+        }
         .ex-download {
             background: #2663ff;
             color: #fff;
@@ -114,12 +152,12 @@
             <h3>Download Team Formation Report</h3>
             <p class="muted">
                 Excel workbook with three sheets: <strong>Teams</strong> (who formed teams with whom, with new-to-QUT flags and shared tutorials),
-                <strong>Unteamed Students</strong> (students not currently in an accepted team), and <strong>Summary</strong> (counts at a glance).
+                <strong>Needs Attention</strong> (students who are not forming a team), and <strong>Summary</strong> (counts at a glance).
             </p>
             <div class="ex-stats" id="ex-stats">
                 <div class="ex-stat"><div class="ex-stat-label">Total students</div><div class="ex-stat-value" id="st-total">–</div></div>
                 <div class="ex-stat"><div class="ex-stat-label">In teams</div><div class="ex-stat-value" id="st-teamed">–</div></div>
-                <div class="ex-stat"><div class="ex-stat-label">Unteamed</div><div class="ex-stat-value" id="st-unteamed">–</div></div>
+                <div class="ex-stat"><div class="ex-stat-label">Needs attention</div><div class="ex-stat-value" id="st-attention">–</div></div>
                 <div class="ex-stat"><div class="ex-stat-label">Teams</div><div class="ex-stat-value" id="st-teams">–</div></div>
             </div>
             <button class="ex-download" id="downloadBtn" onclick="downloadXlsx()" disabled>Download .xlsx</button>
@@ -142,16 +180,20 @@
         </div>
 
         <div class="ex-card">
-            <h3>Preview · Unteamed Students</h3>
-            <p class="muted">Students with no accepted membership in a Forming / Submitted / Approved team.</p>
-            <div class="ex-table-wrap">
-                <table class="ex-table" id="preview-unteamed">
-                    <thead><tr>
-                        <th>Student ID</th><th>Name</th><th>New to QUT</th>
-                        <th>Tutorial Slots</th><th>Reason</th>
-                    </tr></thead>
-                    <tbody><tr><td colspan="5" style="text-align:center;color:#888">Loading…</td></tr></tbody>
-                </table>
+            <h3>Needs Attention</h3>
+            <p class="muted">Students who are not forming a team, most urgent first. Work down the list —
+                once the coloured rows run out, nobody is stuck.</p>
+            <div class="att-kpis" id="att-kpis"></div>
+            <div id="att-body">
+                <div class="ex-table-wrap">
+                    <table class="ex-table" id="preview-attention">
+                        <thead><tr>
+                            <th>Student</th><th>Name</th><th>Team</th>
+                            <th>Team size</th><th>Needs</th><th>New to QUT</th><th>Tutorial Slots</th>
+                        </tr></thead>
+                        <tbody><tr><td colspan="7" style="text-align:center;color:#888">Loading…</td></tr></tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
@@ -176,8 +218,28 @@
     let unit = null;
     let teams = [];
     let roster = [];
-    let teamedIds = new Set();
-    let unteamed = [];
+    let attention = [];
+
+    // Every enrolled student is eager-assigned a team-of-one, so "is in a team"
+    // is always true and can never identify anyone. These are the states that
+    // actually mean a student is not forming a team.
+    //
+    // Ordered most urgent first; a row takes the status of its first match.
+    // Adding a signal (e.g. below minimum size, rejected-not-resubmitted) is a
+    // single entry here.
+    const SIGNALS = [
+        {
+            key: 'alone', status: 'critical', icon: '●', label: 'Alone',
+            // sizeValid guards against crying wolf where a one-person team is a
+            // legal size for the unit — it is the server's own team rule.
+            test: c => c.team && c.team.status === 'FORMING'
+                       && c.teamSize === 1 && !c.team.validation?.sizeValid
+        },
+        {
+            key: 'no_prefs', status: 'serious', icon: '◐', label: 'No preferences',
+            test: c => c.student.entered_preferences != 1
+        }
+    ];
 
     (async () => {
         const user = await requireSession('TEACHER');
@@ -196,28 +258,11 @@
                 get(`/api/units/${unitId}/class-list`),
             ]);
 
-            // "In a team" = ACCEPTED member of a non-rejected team
-            teamedIds = new Set();
-            teams.forEach(t => {
-                if (t.status === 'REJECTED') return;
-                t.members.forEach(m => {
-                    if (m.status === 'ACCEPTED') teamedIds.add(m.student_id);
-                });
-            });
-
-            unteamed = roster
-                .filter(s => !teamedIds.has(s.student_id))
-                .map(s => ({
-                    student_id: s.student_id,
-                    name: s.name || '',
-                    new_to_qut: s.is_new_to_qut == 1,
-                    tutorial_slots: s.tutorial_slots || s.tutorial_time || '',
-                    reason: reasonFor(s.student_id),
-                }));
+            attention = needsAttention();
 
             renderStats();
             renderTeamsPreview();
-            renderUnteamedPreview();
+            renderAttention();
             renderStatusBreakdown();
             document.getElementById('downloadBtn').disabled = false;
         } catch (e) {
@@ -225,22 +270,59 @@
         }
     }
 
-    function reasonFor(studentId) {
-        // Are they in any team at all, just not ACCEPTED / not in a live team?
-        for (const t of teams) {
-            const m = t.members.find(mm => mm.student_id === studentId);
-            if (!m) continue;
-            if (t.status === 'REJECTED') return 'Team rejected';
-            if (m.status !== 'ACCEPTED') return `Invited but ${m.status}`;
+    // The minimum team size this unit will accept, used for the size meter.
+    function minTeamSize() {
+        const sizes = String(unit?.valid_team_sizes || '4')
+            .split(',').map(n => parseInt(n)).filter(Boolean);
+        return sizes.length ? Math.min(...sizes) : 4;
+    }
+
+    function teamOf(studentId) {
+        return teams.find(t => t.members.some(m =>
+            m.student_id === studentId && m.status === 'ACCEPTED'));
+    }
+
+    // One row per affected student, most urgent first. A student matching more
+    // than one signal appears once, under the most urgent.
+    function needsAttention() {
+        const rank = { critical: 0, serious: 1 };
+        const rows = [];
+        for (const student of roster) {
+            const team = teamOf(student.student_id);
+            const teamSize = team ? team.members.filter(m => m.status === 'ACCEPTED').length : 0;
+            const ctx = { student, team, teamSize };
+
+            const hit = SIGNALS.find(s => s.test(ctx));
+            if (!hit) continue;
+
+            rows.push({
+                student_id: student.student_id,
+                name: student.name || '',
+                team_name: team?.team_name || '—',
+                team_size: teamSize,
+                min_size: minTeamSize(),
+                signal: hit.key,
+                status: hit.status,
+                icon: hit.icon,
+                reason: hit.label,
+                new_to_qut: student.is_new_to_qut == 1,
+                tutorial_slots: student.tutorial_slots || student.tutorial_time || ''
+            });
         }
-        return 'Not in any team';
+        return rows.sort((a, b) =>
+            (rank[a.status] - rank[b.status]) ||
+            String(a.name || a.student_id).localeCompare(String(b.name || b.student_id)));
     }
 
     function renderStats() {
-        document.getElementById('st-total').textContent    = roster.length;
-        document.getElementById('st-teamed').textContent   = teamedIds.size;
-        document.getElementById('st-unteamed').textContent = unteamed.length;
-        document.getElementById('st-teams').textContent    = teams.length;
+        const inTeams = new Set();
+        teams.forEach(t => t.members.forEach(m => {
+            if (m.status === 'ACCEPTED') inTeams.add(m.student_id);
+        }));
+        document.getElementById('st-total').textContent     = roster.length;
+        document.getElementById('st-teamed').textContent    = inTeams.size;
+        document.getElementById('st-attention').textContent = attention.length;
+        document.getElementById('st-teams').textContent     = teams.length;
     }
 
     function renderStatusBreakdown() {
@@ -314,25 +396,64 @@
         }
     }
 
-    function renderUnteamedPreview() {
-        const tbody = document.querySelector('#preview-unteamed tbody');
-        if (!unteamed.length) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888">Everyone is in a team.</td></tr>';
+    function renderAttention() {
+        const counts = { critical: 0, serious: 0 };
+        attention.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+        const onTrack = Math.max(0, roster.length - attention.length);
+
+        // Headline counts. Each carries an icon and a word, so the status is
+        // never conveyed by colour alone.
+        document.getElementById('att-kpis').innerHTML = [
+            ['critical', '●', 'Alone',          counts.critical],
+            ['serious',  '◐', 'No preferences', counts.serious],
+            ['good',     '✓', 'On track',       onTrack],
+        ].map(([cls, icon, label, n]) => `
+            <div class="att-kpi ${cls}">
+                <div class="att-kpi-label">${icon} ${esc(label)}</div>
+                <div class="att-kpi-value">${n}</div>
+            </div>`).join('');
+
+        const body = document.getElementById('att-body');
+        if (!attention.length) {
+            body.innerHTML = `<div class="att-empty">✓ Everyone is in a viable team with preferences saved.</div>`;
             return;
         }
-        tbody.innerHTML = unteamed.slice(0, 50).map(s => `
+
+        const rows = attention.slice(0, 50).map(r => {
+            const pct = Math.min(100, Math.round((r.team_size / Math.max(1, r.min_size)) * 100));
+            return `
             <tr>
-                <td>${esc(s.student_id)}</td>
-                <td>${esc(s.name)}</td>
-                <td>${s.new_to_qut
+                <td>${esc(r.student_id)}</td>
+                <td>${esc(r.name)}</td>
+                <td>${esc(r.team_name)}</td>
+                <td>
+                  <div class="att-meter">
+                    <div class="att-meter-track">
+                      <div class="att-meter-fill ${r.status === 'serious' ? 'serious' : ''}" style="width:${pct}%"></div>
+                    </div>
+                    <span class="att-meter-text">${r.team_size} / ${r.min_size}</span>
+                  </div>
+                </td>
+                <td><span class="att-chip ${esc(r.status)}">${r.icon} ${esc(r.reason)}</span></td>
+                <td>${r.new_to_qut
                         ? '<span class="ex-pill ex-pill-yes">Yes</span>'
                         : '<span class="ex-pill ex-pill-no">No</span>'}</td>
-                <td>${esc(s.tutorial_slots)}</td>
-                <td>${esc(s.reason)}</td>
-            </tr>`).join('');
-        if (unteamed.length > 50) {
-            tbody.innerHTML += `<tr><td colspan="5" style="text-align:center;color:#888">…${unteamed.length - 50} more in download</td></tr>`;
-        }
+                <td>${esc(r.tutorial_slots)}</td>
+            </tr>`;
+        }).join('');
+
+        body.innerHTML = `
+            <div class="ex-table-wrap">
+                <table class="ex-table" id="preview-attention">
+                    <thead><tr>
+                        <th>Student</th><th>Name</th><th>Team</th>
+                        <th>Team size</th><th>Needs</th><th>New to QUT</th><th>Tutorial Slots</th>
+                    </tr></thead>
+                    <tbody>${rows}${attention.length > 50
+                        ? `<tr><td colspan="7" style="text-align:center;color:#888">…${attention.length - 50} more in download</td></tr>`
+                        : ''}</tbody>
+                </table>
+            </div>`;
     }
 
     function esc(v) {
@@ -359,42 +480,53 @@
         ];
         XLSX.utils.book_append_sheet(wb, teamsSheet, 'Teams');
 
-        const unteamedSheet = XLSX.utils.json_to_sheet(unteamed.map(s => ({
+        const attentionSheet = XLSX.utils.json_to_sheet(attention.map(s => ({
             'Student ID':      s.student_id,
             'Name':            s.name,
+            'Team':            s.team_name,
+            'Team size':       `${s.team_size} of ${s.min_size}`,
+            'Needs':           s.reason,
             'New to QUT':      s.new_to_qut ? 'Yes' : 'No',
             'Tutorial Slots':  s.tutorial_slots,
-            'Reason':          s.reason,
         })));
-        unteamedSheet['!cols'] = [
-            { wch: 14 }, { wch: 24 }, { wch: 11 }, { wch: 26 }, { wch: 22 },
+        attentionSheet['!cols'] = [
+            { wch: 14 }, { wch: 24 }, { wch: 12 }, { wch: 11 },
+            { wch: 20 }, { wch: 11 }, { wch: 26 },
         ];
-        XLSX.utils.book_append_sheet(wb, unteamedSheet, 'Unteamed Students');
+        XLSX.utils.book_append_sheet(wb, attentionSheet, 'Needs Attention');
 
         const counts = teams.reduce((acc, t) => {
             acc[t.status] = (acc[t.status] || 0) + 1;
             return acc;
         }, { FORMING: 0, SUBMITTED: 0, APPROVED: 0, REJECTED: 0 });
 
-        const newToQutTeamed   = [...teamedIds].filter(id =>
+        const inTeams = new Set();
+        teams.forEach(t => t.members.forEach(m => {
+            if (m.status === 'ACCEPTED') inTeams.add(m.student_id);
+        }));
+        const newToQutTeamed    = [...inTeams].filter(id =>
             roster.find(s => s.student_id === id && s.is_new_to_qut == 1)).length;
-        const newToQutUnteamed = unteamed.filter(s => s.new_to_qut).length;
+        const newToQutAttention = attention.filter(s => s.new_to_qut).length;
+        const alone   = attention.filter(s => s.signal === 'alone').length;
+        const noPrefs = attention.filter(s => s.signal === 'no_prefs').length;
 
         const summarySheet = XLSX.utils.aoa_to_sheet([
             ['Unit',                 [unit.unit_name, unit.description, unit.semester].filter(Boolean).join(' ')],
             ['Exported at',          new Date().toLocaleString()],
             [],
             ['Total students',       roster.length],
-            ['In a team',            teamedIds.size],
-            ['Unteamed',             unteamed.length],
+            ['In a team',            inTeams.size],
+            ['Needs attention',      attention.length],
+            ['· Alone',              alone],
+            ['· No preferences',     noPrefs],
             [],
             ['Teams · Forming',      counts.FORMING],
             ['Teams · Submitted',    counts.SUBMITTED],
             ['Teams · Approved',     counts.APPROVED],
             ['Teams · Rejected',     counts.REJECTED],
             [],
-            ['New-to-QUT · in teams',   newToQutTeamed],
-            ['New-to-QUT · unteamed',   newToQutUnteamed],
+            ['New-to-QUT · in teams',        newToQutTeamed],
+            ['New-to-QUT · needs attention', newToQutAttention],
         ]);
         summarySheet['!cols'] = [{ wch: 26 }, { wch: 40 }];
         XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');

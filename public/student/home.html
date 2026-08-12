@@ -5,6 +5,35 @@
     <title>Student Home – TeamUp</title>
     <link rel="stylesheet" href="/assets/css/style1.css">
     <link rel="stylesheet" href="/assets/css/teacher-style.css">
+    <style>
+        /* Page-local: .t-unit-card is shared with Teacher Home, which keeps its
+           own stats block and must not pick any of this up. */
+        .sh-meta { border-top:1px solid #e0ecf8; margin-top:14px; padding-top:12px }
+        .sh-label { font-size:11px; font-weight:800; letter-spacing:.4px; text-transform:uppercase;
+                    color:#8aabbf; margin-bottom:3px }
+        .sh-value { font-size:14px; color:#1a2a4a; font-weight:600 }
+        .sh-sub   { font-size:12.5px; margin-top:2px }
+        .sh-soon  { color:#b06000; font-weight:700 }
+        .sh-shut  { color:#d03b3b; font-weight:700 }
+        .sh-calm  { color:#5a7a9a }
+
+        /* Progress markers. Filled state is carried by the dot AND the label
+           beneath it, never by colour alone. */
+        .sh-steps { display:flex; gap:0; margin-top:14px }
+        .sh-step  { flex:1; text-align:center; position:relative }
+        .sh-dot   { width:13px; height:13px; border-radius:50%; margin:0 auto 5px;
+                    border:2px solid #c3d5e8; background:#fff }
+        .sh-step.done .sh-dot { background:#0ca30c; border-color:#0ca30c }
+        .sh-step-label { font-size:10.5px; color:#8aabbf; font-weight:700 }
+        .sh-step.done .sh-step-label { color:#1a2a4a }
+        /* Connector between dots, drawn behind them. */
+        .sh-step:not(:first-child)::before {
+            content:''; position:absolute; top:6px; left:-50%; width:100%;
+            height:2px; background:#dbe7f3; z-index:0;
+        }
+        .sh-step.done:not(:first-child)::before { background:#0ca30c }
+        .sh-dot { position:relative; z-index:1 }
+    </style>
 </head>
 <body class="t-page">
 <header class="t-header">
@@ -30,6 +59,13 @@
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/student-nav.js"></script>
 <script>
+    const escapeHtml = value => String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+
     (async () => {
         const nav = await initStudentNav({ activeItem: 'home', pageTitle: 'Student Home' });
         if (!nav) return;
@@ -37,15 +73,31 @@
         try {
             const units = await get('/api/student/units');
             if (!units.length) {
-                grid.innerHTML = '<p class="t-empty">You are not enrolled in any units yet.</p>';
+                // Units are private: you only see one once your teacher has put
+                // your email on its class list. Say so, or an excluded student
+                // just sees an unexplained blank page.
+                grid.innerHTML = `
+                    <p class="t-empty" style="line-height:1.6">
+                      No units yet.<br>
+                      Your teacher adds you to a unit using the email address you
+                      signed up with — <strong>${escapeHtml(nav.user.email || nav.user.username)}</strong>.
+                      Once they do, the unit appears here.<br>
+                      <span style="font-size:13px;color:#8aabbf">
+                        If you expected a unit to be listed, check with your teacher
+                        that they used this address.
+                      </span>
+                    </p>`;
                 return;
             }
             grid.innerHTML = units.map(u => `
         <div class="t-unit-card">
           <div class="t-unit-body">
-            <h3 class="t-unit-name">${u.unit_name}</h3>
-            <p class="t-unit-desc">${u.description || ''}</p>
-            <p class="t-unit-sem">${u.semester || ''}</p>
+            <h3 class="t-unit-name">${escapeHtml(u.unit_name)}</h3>
+            <p class="t-unit-desc">${escapeHtml(u.description || '')}</p>
+            <p class="t-unit-sem">${escapeHtml(u.semester || '')}</p>
+            ${deadlineBlock(u)}
+            ${statusBlock(u)}
+            ${u.joined ? stepsBlock(u) : ''}
           </div>
           ${u.joined
                 ? `<button class="t-open-btn"
@@ -63,6 +115,68 @@
             grid.innerHTML = `<p class="t-empty">Error: ${e.message}</p>`;
         }
     })();
+    // ── Card detail blocks ──────────────────────────────────────────────────
+    // Each returns '' rather than an empty shell when it has nothing to say, so
+    // a sparse unit renders a compact card instead of blank labelled rows.
+
+    function deadlineBlock(u) {
+        const d = formatDeadline(u.deadline, 'short');
+        if (!d.ok) return '';                      // unset or unparseable — never "Invalid Date"
+        // Amber inside a week is a nudge, not an alarm; the label carries the
+        // meaning either way, so the colour is never doing the work alone.
+        const soon = !d.passed && /^[1-7] days? remaining$/.test(d.remaining);
+        const cls = d.passed ? 'sh-shut' : soon ? 'sh-soon' : 'sh-calm';
+        return `
+          <div class="sh-meta">
+            <div class="sh-label">Team formation deadline</div>
+            <div class="sh-value">${escapeHtml(d.text)}</div>
+            <div class="sh-sub ${cls}">${escapeHtml(d.passed ? 'Closed — your teacher organises the final teams' : d.remaining)}</div>
+          </div>`;
+    }
+
+    function statusBlock(u) {
+        let label = 'Your status', value, sub = '';
+        if (!u.joined) {
+            value = 'Not joined yet';
+            sub = 'Join to set your preferences and find teammates.';
+        } else if (!u.team_id) {
+            value = 'No team yet';
+            sub = 'You are not on a team in this unit.';
+        } else {
+            label = 'Your team';
+            const size = Number(u.team_size) || 0;
+            const members = `${size} member${size === 1 ? '' : 's'}`;
+            // Same vocabulary the dashboard uses, so one state never reads as two
+            // different things across pages.
+            value = u.team_status === 'APPROVED'  ? `${u.team_name} · Approved`
+                  : u.team_status === 'SUBMITTED' ? `${u.team_name} · Submitted`
+                  : `${u.team_name} · ${members}`;
+            sub = u.team_status === 'APPROVED'  ? 'Approved by your teacher.'
+                : u.team_status === 'SUBMITTED' ? `${members} · awaiting teacher review`
+                : 'Still forming — you can add or change teammates.';
+        }
+        return `
+          <div class="sh-meta">
+            <div class="sh-label">${label}</div>
+            <div class="sh-value">${escapeHtml(value)}</div>
+            <div class="sh-sub sh-calm">${escapeHtml(sub)}</div>
+          </div>`;
+    }
+
+    function stepsBlock(u) {
+        const steps = [
+            ['Rules',      u.read_rules],
+            ['Preferences', u.entered_preferences],
+            ['Team',       u.in_team],
+            ['Submitted',  u.submitted_request],
+        ];
+        return `<div class="sh-steps">${steps.map(([name, done]) => `
+            <div class="sh-step${done ? ' done' : ''}">
+              <div class="sh-dot"></div>
+              <div class="sh-step-label">${name}</div>
+            </div>`).join('')}</div>`;
+    }
+
     async function joinUnit(unitId) {
         try {
             await post(`/api/student/units/${unitId}/join`, {});

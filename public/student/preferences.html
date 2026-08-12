@@ -14,6 +14,24 @@
         .pref-radio-list label { display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer }
         .pref-text-input { width:100%;border:1.5px solid #d0dff0;border-radius:8px;padding:10px 12px;font-size:14px;outline:none }
         .pref-layout { display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:28px 32px }
+
+        /* Required / optional marking */
+        .pref-head { display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px }
+        .pref-step-badge.in-head { margin-bottom:0 }
+        .pref-flag {
+            font-size:11px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;
+            padding:3px 9px;border-radius:20px;
+        }
+        .pref-flag.required { background:#fff0f3;color:#e94560 }
+        .pref-flag.optional { background:#f0f0f0;color:#777 }
+
+        /* A section the student still has to fill in */
+        .pref-section.pref-invalid { border-color:#e94560;box-shadow:0 0 0 3px rgba(233,69,96,.10) }
+
+        .pref-msg { border-radius:10px;padding:12px 16px;font-size:14px;font-weight:600;
+                    margin-top:10px;line-height:1.5;display:none }
+        .pref-msg.error   { background:#fff0f3;border:1.5px solid #e94560;color:#a8253a }
+        .pref-msg.success { background:#e7f9ee;border:1.5px solid #22c55e;color:#15803d }
     </style>
 </head>
 <body class="t-page">
@@ -33,12 +51,18 @@
         <div class="pref-layout">
             <!-- Left column -->
             <div>
-                <div class="pref-section">
-                    <div class="pref-step-badge">Step 1: Tutorial Availability</div>
+                <div class="pref-section" id="section-tutorial">
+                    <div class="pref-head">
+                        <div class="pref-step-badge in-head">Step 1: Tutorial Availability</div>
+                        <span class="pref-flag required" id="flag-tutorial">Required</span>
+                    </div>
                     <div id="tutorial-slots" class="pref-checkbox-grid"></div>
                 </div>
-                <div class="pref-section">
-                    <div class="pref-step-badge">Step 2: Project Interests</div>
+                <div class="pref-section" id="section-interest">
+                    <div class="pref-head">
+                        <div class="pref-step-badge in-head">Step 2: Project Interests</div>
+                        <span class="pref-flag required">Required</span>
+                    </div>
                     <div class="pref-checkbox-grid">
                         <label><input type="checkbox" name="interest" value="Web Development"> Web Development</label>
                         <label><input type="checkbox" name="interest" value="UX/UI Design"> UX/UI Design</label>
@@ -49,12 +73,15 @@
                     </div>
                 </div>
                 <button class="t-open-btn" onclick="savePrefs()" style="width:220px;margin-top:8px">Save Preferences</button>
-                <p id="save-msg" style="font-size:13px;color:#22c55e;margin-top:8px;display:none">Saved!</p>
+                <div id="save-msg" class="pref-msg"></div>
             </div>
             <!-- Right column -->
             <div>
-                <div class="pref-section">
-                    <div class="pref-step-badge">Step 3: Skills</div>
+                <div class="pref-section" id="section-skill">
+                    <div class="pref-head">
+                        <div class="pref-step-badge in-head">Step 3: Skills</div>
+                        <span class="pref-flag required">Required</span>
+                    </div>
                     <div class="pref-checkbox-grid">
                         <label><input type="checkbox" name="skill" value="React"> React</label>
                         <label><input type="checkbox" name="skill" value="JavaScript"> JavaScript</label>
@@ -64,8 +91,11 @@
                         <label><input type="checkbox" name="skill" value="Testing"> Testing</label>
                     </div>
                 </div>
-                <div class="pref-section">
-                    <div class="pref-step-badge">Step 4: Preferred Role</div>
+                <div class="pref-section" id="section-role">
+                    <div class="pref-head">
+                        <div class="pref-step-badge in-head">Step 4: Preferred Role</div>
+                        <span class="pref-flag required">Required</span>
+                    </div>
                     <div class="pref-radio-list">
                         <label><input type="radio" name="role" value="Team Leader"> Team Leader</label>
                         <label><input type="radio" name="role" value="Frontend Developer"> Frontend Developer</label>
@@ -75,9 +105,12 @@
                         <label><input type="radio" name="role" value="Documentation Writer"> Documentation Writer</label>
                     </div>
                 </div>
-                <div class="pref-section">
-                    <div class="pref-step-badge">Step 5: Preferred Teammates</div>
-                    <p style="font-size:13px;color:#555;margin-bottom:8px">Enter student names or IDs, separated by commas (optional)</p>
+                <div class="pref-section" id="section-teammates">
+                    <div class="pref-head">
+                        <div class="pref-step-badge in-head">Step 5: Preferred Teammates</div>
+                        <span class="pref-flag optional">Optional</span>
+                    </div>
+                    <p style="font-size:13px;color:#555;margin-bottom:8px">Enter student names or IDs, separated by commas</p>
                     <input type="text" id="preferred-teammates" class="pref-text-input" placeholder="e.g. Alex Tan, n12345678">
                 </div>
             </div>
@@ -89,6 +122,11 @@
 <script src="/assets/js/student-nav.js"></script>
 <script>
     let unitId;
+    // Tutorial availability can only be required when the teacher has published
+    // slots — otherwise there is nothing to tick and the student could never
+    // save. Mirrors the same exemption on the server.
+    let tutorialRequired = false;
+
     (async () => {
         const nav = await initStudentNav({ activeItem: 'preferences', pageTitle: 'My Preference' });
         if (!nav) return;
@@ -100,8 +138,32 @@
         const slots = await get(`/api/student/units/${unitId}/tutorial-slots`);
         const slotContainer = document.getElementById('tutorial-slots');
         if (!slots.length) {
-            slotContainer.innerHTML = '<p style="color:#888;font-size:13px">Your teacher hasn’t added any tutorial slots yet.</p>';
+            // Say what this MEANS, not just that the list is empty. The question a
+            // student actually has here is "am I blocked?", and the answer is no.
+            // The badge is relabelled rather than removed: every other section
+            // carries one, so a bare step surrounded by red "Required" badges reads
+            // as unfinished and blocking.
+            const flag = document.getElementById('flag-tutorial');
+            flag.className = 'pref-flag optional';
+            flag.textContent = 'Not needed';
+
+            // With must_share_tutorial on and no slots published, the rules page
+            // promises something nothing can satisfy — validateTeam derives shared
+            // tutorials from slot data, so every team reads as not sharing one.
+            // Better to name that now than let it look like the student's fault.
+            const shareNote = unit.must_share_tutorial
+                ? ' This unit also asks teams to share a tutorial, so your team may show that rule ' +
+                  'as unmet until your teacher adds the slots.'
+                : '';
+            // The container is a two-column checkbox grid; prose in one cell wraps
+            // at half width and reads badly, so span both.
+            slotContainer.innerHTML =
+                '<p style="grid-column:1/-1;color:#555;font-size:13px;line-height:1.6;margin:0">' +
+                'Your teacher hasn’t added any tutorial slots yet, so <strong>you can still save your ' +
+                'preferences</strong> — just skip this step. If slots are added later, come back and ' +
+                'pick your times.' + shareNote + '</p>';
         } else {
+            tutorialRequired = true;
             slotContainer.innerHTML = slots.map(s =>
                 `<label><input type="checkbox" name="tutorial" value="${s.label}"> ${s.label}</label>`
             ).join('');
@@ -128,6 +190,22 @@
         }
     })();
 
+    function showMessage(kind, text) {
+        const msg = document.getElementById('save-msg');
+        msg.className = `pref-msg ${kind}`;
+        msg.textContent = text;
+        msg.style.display = 'block';
+    }
+
+    function markSections(invalidIds) {
+        for (const id of ['tutorial', 'interest', 'skill', 'role']) {
+            const el = document.getElementById(`section-${id}`);
+            if (!el) continue;
+            if (invalidIds.includes(id)) el.classList.add('pref-invalid');
+            else el.classList.remove('pref-invalid');
+        }
+    }
+
     async function savePrefs() {
         const tutorialSlots     = [...document.querySelectorAll('input[name="tutorial"]:checked')].map(e => e.value);
         const projectInterests  = [...document.querySelectorAll('input[name="interest"]:checked')].map(e => e.value);
@@ -135,11 +213,46 @@
         const preferredRole     = document.querySelector('input[name="role"]:checked')?.value || '';
         const preferredTeammates = document.getElementById('preferred-teammates').value.trim() || 'None';
 
-        await post(`/api/student/units/${unitId}/prefs`, { tutorialSlots, projectInterests, skills, preferredRole, preferredTeammates });
-        const msg = document.getElementById('save-msg');
-        msg.style.display = 'block';
-        setTimeout(() => { msg.style.display = 'none'; }, 2000);
+        // Everything but preferred teammates is required. Checked before the
+        // request so nothing incomplete is sent; the server enforces the same
+        // rule for anything that bypasses this page.
+        const missing = [];
+        if (tutorialRequired && !tutorialSlots.length) missing.push(['tutorial', 'tutorial availability']);
+        if (!projectInterests.length)                 missing.push(['interest', 'at least one project interest']);
+        if (!skills.length)                           missing.push(['skill', 'at least one skill']);
+        if (!preferredRole)                           missing.push(['role', 'a preferred role']);
+
+        markSections(missing.map(m => m[0]));
+        if (missing.length) {
+            const names = missing.map(m => m[1]);
+            const list = names.length === 1 ? names[0]
+                : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+            showMessage('error', `Please choose ${list} before saving.`);
+            // The form is two columns, so the missing section may be off-screen.
+            document.getElementById(`section-${missing[0][0]}`)
+                ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+
+        try {
+            await post(`/api/student/units/${unitId}/prefs`,
+                { tutorialSlots, projectInterests, skills, preferredRole, preferredTeammates });
+            showMessage('success', 'Preferences saved successfully.');
+        } catch (e) {
+            // A server-side rejection must not look like a silent failure.
+            showMessage('error', e.message);
+        }
     }
+
+    // Clear the warning as soon as the student starts fixing it, so stale red
+    // borders don't outlive the problem.
+    document.addEventListener('change', e => {
+        if (!e.target || !e.target.name) return;
+        if (['tutorial', 'interest', 'skill', 'role'].includes(e.target.name)) {
+            const msg = document.getElementById('save-msg');
+            if (msg.classList.contains('error')) { msg.style.display = 'none'; markSections([]); }
+        }
+    });
 </script>
 </body>
 </html>

@@ -1,0 +1,37 @@
+# ── Secrets — never commit ──────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Dependencies ────────────────────────────────────────────────────────────
+# Reinstall with `npm install` (see README).
+node_modules/
+
+# ── Local database ──────────────────────────────────────────────────────────
+# Holds real accounts, email addresses and password hashes. The app recreates
+# an empty one on first run via db/SchemaMigrator.js.
+# To share a scrubbed seed database, un-ignore it explicitly: !seed-data.db
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ── IDE / editor state (machine-specific) ───────────────────────────────────
+.idea/
+.vs/
+.vscode/
+*.suo
+*.user
+*.wsuo
+
+# ── Claude local config (contains absolute paths and permission grants) ─────
+.claude/
+
+# ── OS / OneDrive noise ─────────────────────────────────────────────────────
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# ── Logs ────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*

@@ -36,6 +36,7 @@
                 <div class="t-deadline-heading">Deadline</div>
                 <div class="t-deadline-date" id="deadlineDate">–</div>
                 <div class="t-deadline-remaining" id="deadlineRemaining"></div>
+                <button class="t-deadline-edit-btn" id="editDeadlineBtn">Edit Deadline</button>
             </div>
             <div class="t-warning-circle">!</div>
         </div>
@@ -92,10 +93,10 @@
 
             // Deadline countdown
             if (u.deadline) {
-                const d       = new Date(u.deadline);
-                const dayName = d.toLocaleDateString('en-AU', { weekday: 'long' });
-                const time    = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
-                document.getElementById('deadlineDate').textContent = `${dayName} , ${time}`;
+                const d = new Date(u.deadline);
+                document.getElementById('deadlineDate').textContent =
+                    d.toLocaleString('en-AU', { weekday:'long', day:'numeric', month:'long',
+                                                year:'numeric', hour:'numeric', minute:'2-digit' });
 
                 const diffDays = Math.ceil((d - new Date()) / 86400000);
                 document.getElementById('deadlineRemaining').textContent =
@@ -115,6 +116,7 @@
 
             document.getElementById('rulesList').innerHTML = rules.map(r => `<li>✓ ${r}</li>`).join('');
             document.getElementById('editRulesBtn').onclick = () => openEditRules(u);
+            document.getElementById('editDeadlineBtn').onclick = () => openEditDeadline(u);
             document.getElementById('manageSlotsBtn').onclick = openSlotManager;
 
         } catch(e) { console.error('loadUnit:', e); }
@@ -172,21 +174,61 @@
 
     let currentUnit = null;
 
+    // Stored deadline -> the value format a datetime-local input expects.
+    // Shared by both dialogs so they can never disagree.
+    function toDatetimeLocal(value) {
+        if (!value) return '';
+        const d = new Date(value);
+        if (isNaN(d)) return '';
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
     function openEditRules(u) {
         currentUnit = u;
         document.getElementById('er-sizes').value    = u.valid_team_sizes || '4';
         document.getElementById('er-newqut').value   = u.max_new_to_qut   || 2;
         document.getElementById('er-onegroup').checked = !!u.max_one_group;
         document.getElementById('er-tutorial').checked = !!u.must_share_tutorial;
-        // Convert stored deadline to datetime-local format
-        if (u.deadline) {
-            const d = new Date(u.deadline);
-            const pad = n => String(n).padStart(2, '0');
-            document.getElementById('er-deadline').value =
-                `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        }
+        document.getElementById('er-deadline').value = toDatetimeLocal(u.deadline);
         document.getElementById('er-save-msg').textContent = '';
         document.getElementById('editRulesModal').classList.add('open');
+    }
+
+    // ── Deadline-only dialog, reached straight from the banner ──────────
+    function openEditDeadline(u) {
+        currentUnit = u;
+        document.getElementById('ed-deadline').value = toDatetimeLocal(u.deadline);
+        const msg = document.getElementById('ed-save-msg');
+        msg.textContent = '';
+        msg.style.color = '';
+        document.getElementById('editDeadlineModal').classList.add('open');
+    }
+
+    function closeEditDeadline() {
+        document.getElementById('editDeadlineModal').classList.remove('open');
+    }
+
+    async function saveDeadline() {
+        const msg = document.getElementById('ed-save-msg');
+        const deadline = document.getElementById('ed-deadline').value;
+        if (!deadline) {
+            msg.style.color = '#e94560';
+            msg.textContent = 'Please pick a date and time.';
+            return;
+        }
+        try {
+            // Only the deadline is sent: updateRules falls back to the stored
+            // value for every field left undefined, so the rule set is preserved.
+            await put(`/api/units/${unitId}/rules`, { deadline });
+            msg.style.color = '';
+            msg.textContent = 'Saved!';
+            setTimeout(closeEditDeadline, 800);
+            await loadUnit();
+        } catch(e) {
+            msg.style.color = '#e94560';
+            msg.textContent = e.message;
+        }
     }
 
     function closeEditRules() {
@@ -276,6 +318,22 @@
         }
     }
 </script>
+<!-- Edit Deadline Modal -->
+<div class="t-modal-overlay" id="editDeadlineModal">
+    <div class="t-modal-box">
+        <h3>Edit Deadline</h3>
+        <div class="t-modal-field">
+            <label>Team formation deadline</label>
+            <input type="datetime-local" id="ed-deadline">
+        </div>
+        <p id="ed-save-msg" class="t-save-msg"></p>
+        <div class="t-modal-actions">
+            <button class="t-modal-cancel" onclick="closeEditDeadline()">Cancel</button>
+            <button class="t-modal-save" onclick="saveDeadline()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
 <!-- Edit Rules Modal -->
 <div class="t-modal-overlay" id="editRulesModal">
     <div class="t-modal-box">

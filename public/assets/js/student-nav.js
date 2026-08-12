@@ -1,6 +1,7 @@
 const STUDENT_NAV_ITEMS = [
     { key: 'home',           label: 'Home',           href: '/student/home.html',             noUnit: true },
     { key: 'dashboard',      label: 'Dashboard',      href: '/student/dashboard.html' },
+    { key: 'notifications',  label: 'Notifications',  href: '/student/notifications.html', badge: true },
     { key: 'announcements',  label: 'Announcements',  href: '/student/announcements.html' },
     { key: 'rules',          label: 'Rules',          href: '/student/rules.html',            stage: 'read_rules' },
     { key: 'preferences',    label: 'Preferences',    href: '/student/preferences.html',      stage: 'entered_preferences' },
@@ -38,6 +39,17 @@ async function initStudentNav({ activeItem, pageTitle }) {
                 progress = await fetch(`/api/student/units/${unitId}/progress`)
                     .then(r => r.json());
             } catch { /* sidebar still renders without progress */ }
+        }
+
+        // Unread notification count for the sidebar badge. Non-blocking, like
+        // progress above: the sidebar must still render if this call fails.
+        let unreadCount = 0;
+        if (unitId) {
+            try {
+                const c = await fetch(`/api/student/units/${unitId}/notifications/count`)
+                    .then(r => r.json());
+                unreadCount = c.count || 0;
+            } catch { /* sidebar still renders without the badge */ }
         }
 
         // Fetch unit name for sidebar header
@@ -89,22 +101,27 @@ async function initStudentNav({ activeItem, pageTitle }) {
                     display: inline-block; margin-left: auto;
                 "></span>` : '';
 
+            // Red unread count — omitted entirely at zero so it only ever
+            // appears when there is something to look at.
+            const badge = (item.badge && unreadCount > 0)
+                ? `<span class="t-snav-badge">${unreadCount}</span>` : '';
+
             if (isActive) {
                 html += `
                     <button class="t-snav-active" style="display:flex;align-items:center;gap:6px">
-                        ${item.label}${dot}
+                        ${item.label}${badge}${dot}
                     </button>`;
             } else if (disabled) {
                 html += `
                     <span class="t-snav-link t-snav-disabled"
                           style="display:flex;align-items:center;gap:6px">
-                        ${item.label}${dot}
+                        ${item.label}${badge}${dot}
                     </span>`;
             } else {
                 html += `
                     <a class="t-snav-link" href="${href}"
                        style="display:flex;align-items:center;gap:6px">
-                        ${item.label}${dot}
+                        ${item.label}${badge}${dot}
                     </a>`;
             }
         });
@@ -117,6 +134,59 @@ async function initStudentNav({ activeItem, pageTitle }) {
 
 function studentLogout() {
     fetch('/api/auth/logout', { method: 'POST' }).then(() => window.location = '/');
+}
+
+// Team formation closes when the unit's deadline passes — derived exactly as
+// the server derives it, so the page and the API always agree.
+function isUnitLocked(unit) {
+    if (!unit || !unit.deadline) return false;
+    const at = Date.parse(unit.deadline);
+    return !isNaN(at) && at <= Date.now();
+}
+
+// Shared banner so every student page explains the lock the same way.
+function lockedBannerHtml(extra = '') {
+    return `
+      <div style="background:#fdf3f3;border:1.5px solid #d03b3b;border-radius:12px;
+                  padding:14px 18px;margin-bottom:16px">
+        <div style="font-size:15px;font-weight:800;color:#a82f2f">🔒 Team formation is closed</div>
+        <div style="font-size:13px;color:#7a3a48;margin-top:4px;line-height:1.55">
+          The deadline has passed, so you can no longer send or accept team requests,
+          leave a team, or submit for approval. Your teacher organises the final teams
+          from here.${extra ? ' ' + extra : ''}
+        </div>
+      </div>`;
+}
+
+// Shared deadline presentation. `style` picks the wording, not the rules:
+//   'long'  — the dashboard banner's full form
+//   'short' — compact enough for a unit card
+// Always returns an object, so callers never have to guard for a missing or
+// unparseable date and can never render "Invalid Date".
+//
+// Note: dashboard.html and rules.html still format inline. Their exact strings
+// are asserted by the `deadline` suite, so they are deliberately left alone —
+// this exists so Home did not become a third copy of the logic.
+const DEADLINE_FORMATS = {
+    long:  { weekday:'long',  day:'numeric', month:'long',  year:'numeric', hour:'numeric', minute:'2-digit' },
+    short: { weekday:'short', day:'numeric', month:'short', year:'numeric', hour:'numeric', minute:'2-digit' },
+};
+
+function formatDeadline(deadline, style = 'short', now = Date.now()) {
+    const raw = String(deadline ?? '').trim();
+    if (!raw) return { ok: false, text: '', remaining: '', passed: false };
+
+    const at = Date.parse(raw);
+    if (isNaN(at)) return { ok: false, text: '', remaining: '', passed: false };
+
+    const d = new Date(at);
+    const days = Math.ceil((at - now) / (1000 * 60 * 60 * 24));
+    return {
+        ok: true,
+        text: d.toLocaleString('en-AU', DEADLINE_FORMATS[style] || DEADLINE_FORMATS.short),
+        remaining: days > 0 ? `${days} day${days > 1 ? 's' : ''} remaining` : 'Closed',
+        passed: at <= now,
+    };
 }
 
 async function requireUnitAccess(unitId) {

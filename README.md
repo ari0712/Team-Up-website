@@ -31,6 +31,71 @@ http://localhost:3000
 
 The server listens on `PORT` (default `3000`).
 
+## Upgrading from an older clone
+
+**Read this before pulling if you cloned before `921353e`.** `teamup.db` used to be committed. It no
+longer is — it holds real accounts and password hashes, so it is now git-ignored. The commit that
+removes it will also delete **your** local database and your `node_modules`, so back the database up
+first or you lose everything you have added.
+
+Git protects you on the first attempt. Because your `teamup.db` is tracked *and* modified, `git pull`
+stops with:
+
+```
+error: Your local changes to the following files would be overwritten by merge:
+        teamup.db
+Please commit your changes or stash them before you merge.
+```
+
+Do **not** reach for `git stash` or `git reset --hard` here — both discard your data. Do this instead:
+
+```bash
+# 1. Back up your database OUTSIDE the repo folder
+cp teamup.db ../teamup-backup.db          # Windows: copy teamup.db ..\teamup-backup.db
+
+# 2. Let git delete the tracked copy cleanly
+git checkout -- teamup.db
+
+# 3. Pull (only stash first if you have your own *code* edits)
+git pull
+
+# 4. Reinstall dependencies — node_modules is no longer tracked
+npm install
+
+# 5. Put your database back; it is git-ignored now, so it stays yours
+cp ../teamup-backup.db teamup.db          # Windows: copy ..\teamup-backup.db teamup.db
+
+# 6. Run
+npm start
+```
+
+Your data survives the upgrade. `SchemaMigrator` runs on every start, creates the new tables and
+columns in place, and backfills the new per-unit roster from existing enrolments, so your students
+keep access. On first start you should see:
+
+```
+Loaded existing teamup.db
+Roster backfill: N existing enrolments granted access
+```
+
+If it says `Created new teamup.db` instead, step 5 did not happen — the app is running on an empty
+database and your backup is still sitting outside the repo.
+
+**Already pulled and lost the file?** The last *committed* version is still in history (your newest
+changes since that commit are not):
+
+```bash
+git checkout c6a09d2 -- teamup.db
+git rm --cached teamup.db     # required — the line above re-stages it for commit
+```
+
+**One edge case.** The roster backfill matches on email, so an enrolled student whose account has no
+email address gets no roster entry and will not see that unit. Re-add them from
+**Class List → Who Can Join**.
+
+From here on `teamup.db` is ignored, so it will never conflict on a pull again and everyone keeps
+their own local data.
+
 ## Roles & Portals
 
 Open `http://localhost:3000` to reach the portal-select page. From there you sign in
@@ -168,6 +233,46 @@ session of the matching role.
 | POST | `/units/:unitId/proposals` | Propose merging with another team |
 | GET  | `/units/:unitId/proposals` | List proposals the caller is part of |
 | PATCH | `/units/:unitId/proposals/:id/vote` | Vote yes / no on a proposal |
+
+## Email notifications
+
+Students get a **Notifications** tab with an unread badge, covering team requests,
+deadline reminders, team status changes and teacher announcements. Each new
+notification is also dispatched as an email by the background pass.
+
+Configure with a `.env` file in the project root (copy `.env.example`). `.env` is
+git-ignored; real environment variables override it.
+
+| Transport | `MAIL_TRANSPORT` | What it does |
+| --- | --- | --- |
+| Console | `console` *(default)* | Records to `email_outbox` and the log. **Nothing is sent.** |
+| Ethereal | `ethereal` | Real SMTP to a disposable test inbox. No credentials. Each message gets a preview URL, stored in `email_outbox.preview_url`. |
+| SMTP | `smtp` | Real delivery via `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`. |
+
+### Before switching on real delivery
+
+> **`MAIL_TRANSPORT=smtp` sends real email to every address in the `users` table.**
+> Seed and demo accounts have live third-party addresses, and email cannot be recalled.
+
+Two guards, both applied to every transport:
+
+```bash
+MAIL_REDIRECT_TO=you@example.com   # ALL mail goes here; the real recipient is
+                                   # kept in email_outbox.intended_recipient
+                                   # and named in the message body
+MAIL_ALLOWLIST=you@example.com,@qut.edu.au   # only these may receive mail;
+                                             # anything else is recorded skipped
+```
+
+`MAIL_REDIRECT_TO` takes precedence over `MAIL_ALLOWLIST`. On startup the server
+prints which transport is active and whether mail is being redirected.
+
+**Gmail:** enable 2-Step Verification, then create a 16-character App Password
+(Google Account → Security → 2-Step Verification → App passwords); a normal
+account password is rejected. Use `SMTP_HOST=smtp.gmail.com` with `SMTP_PORT=465`.
+
+Every dispatch decision — sent, skipped or failed, and why — is recorded in the
+`email_outbox` table, and each notification is emailed at most once.
 
 ## Notes & limitations
 

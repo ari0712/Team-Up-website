@@ -61,6 +61,10 @@ module.exports = function createStudentRouter({ studentPortalService }) {
   router.get('/units/:unitId/students', (req, res) =>
     send(res, () => res.json(svc.searchClassmates(req.params.unitId, sid(req), req.query))));
 
+  // Ranked merge suggestions for the signed-in student. Recommends only.
+  router.get('/units/:unitId/auto-match', (req, res) =>
+    send(res, () => res.json(svc.autoMatch(req.params.unitId, sid(req)))));
+
   router.get('/units/:unitId/my-team', (req, res) =>
     send(res, () => res.json(svc.getMyTeam(req.params.unitId, sid(req)))));
 
@@ -85,6 +89,22 @@ module.exports = function createStudentRouter({ studentPortalService }) {
       svc.markProposalSeen(req.params.id, sid(req));
       res.json({ ok: true });
     }));
+
+  // ── Notifications ───────────────────────────────────────────────
+  // Both reads sync first, so the inbox and the nav badge are always current
+  // without any event plumbing. Email is dispatched only on the timer.
+  router.get('/units/:unitId/notifications', (req, res) =>
+    send(res, () => res.json(svc.listNotifications(req.params.unitId, sid(req)))));
+
+  router.get('/units/:unitId/notifications/count', (req, res) =>
+    send(res, () => res.json(svc.unreadNotificationCount(req.params.unitId, sid(req)))));
+
+  router.patch('/units/:unitId/notifications/:id/read', (req, res) =>
+    send(res, () => res.json(
+      svc.markNotificationRead(req.params.unitId, sid(req), parseInt(req.params.id)))));
+
+  router.post('/units/:unitId/notifications/read-all', (req, res) =>
+    send(res, () => res.json(svc.markAllNotificationsRead(req.params.unitId, sid(req)))));
 
   // ── Membership mutations ────────────────────────────────────────
   router.delete('/units/:unitId/teams/:teamId/members/:studentId', (req, res) =>
