@@ -95,19 +95,25 @@
         </div>
         <p class="t-csv-hint">
             One column headed <code>email</code>, one address per row — these are the students
-            allowed to join. Anything else in the file is ignored for now.
+            allowed to join. Optional columns are picked up when the header names them:
+            <code>name</code>, <code>student id</code>, <code>tutorial</code>, <code>degree</code>,
+            <code>major</code>, <code>minor</code>, <code>units passed</code>,
+            <code>new to QUT</code>, <code>skills</code>.
+            You can upload more files later from the Class List page to add students to this unit.
         </p>
         <div class="t-error" id="errorMsg"></div>
     </div>
 </main>
 <script src="/assets/js/api.js"></script>
+<script src="/assets/js/roster-csv.js"></script>
 <script>
-    // The class list is an email list, nothing more: one column headed "email",
-    // one address per row. Email is the only field that does anything — it is
-    // the roster match key, so a row without one can never admit anybody. The
-    // richer per-student columns (tutorial time, degree, skills) are a later
-    // spreadsheet; until then any extra column is ignored rather than guessed at.
-    const EMAIL_RE = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+    // Email is the one field that must be present — it is the roster match key,
+    // so a row without one can never admit anybody. Optional per-student columns
+    // (name, tutorial time, degree, skills) are picked up when the file has a
+    // header naming them; see parseRosterCsv in /assets/js/roster-csv.js.
+    //
+    // This is not a one-shot import: more files can be uploaded later from the
+    // Class List page to top the same unit up.
     const state = {
         teamSizes: new Set([4, 5]),
         maxOneGroup: true,
@@ -153,10 +159,6 @@
         document.getElementById(`tick-${rule}`).style.visibility = state[rule] ? 'visible' : 'hidden';
     }
 
-    // Strips a UTF-8 BOM, which Excel writes on "CSV UTF-8" export and which
-    // would otherwise make the first header read "﻿email" and never match.
-    const cell = v => String(v ?? '').replace(/^﻿/, '').trim().replace(/^"(.*)"$/, '$1').trim();
-
     function onCsvSelected(input) {
         const file = input.files[0];
         const countEl = document.getElementById('csvCount');
@@ -165,51 +167,13 @@
 
         const reader = new FileReader();
         reader.onload = e => {
-            const say = (text, bad) => {
-                countEl.textContent = text;
-                countEl.style.color = bad ? '#e94560' : '#0a7d0a';
-            };
-            const rows = String(e.target.result).split(/\r?\n/)
-                .map(l => l.split(',').map(cell)).filter(r => r.some(v => v));
-            if (!rows.length) { state.students = []; say('(file is empty)', true); return; }
-
-            // Which column holds the address? A header named "email" wins. Failing
-            // that, fall back to the first column that actually looks like email —
-            // so a bare list with no header row still imports.
-            const header = rows[0].map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
-            let col = header.findIndex(h => h === 'email' || h === 'emailaddress');
-            let start = 1;
-            if (col === -1) {
-                col = rows[0].findIndex(v => EMAIL_RE.test(v));
-                start = 0;                          // no header — row 0 is data
-            }
-            if (col === -1) {
-                state.students = [];
-                say('no email column found — see the format note', true);
-                return;
-            }
-
-            const seen = new Set();
-            let invalid = 0, duplicate = 0;
-            state.students = [];
-            for (let i = start; i < rows.length; i++) {
-                const email = (rows[i][col] || '').toLowerCase();
-                if (!email) continue;
-                if (!EMAIL_RE.test(email)) { invalid++; continue; }
-                if (seen.has(email)) { duplicate++; continue; }
-                seen.add(email);
-                state.students.push({ email });
-            }
-
-            const n = state.students.length;
-            const notes = [];
-            if (duplicate) notes.push(`${duplicate} duplicate${duplicate !== 1 ? 's' : ''} merged`);
-            if (invalid)   notes.push(`${invalid} invalid skipped`);
+            const r = parseRosterCsv(e.target.result);
+            state.students = r.students;
             // Loading zero addresses is a failure, not a quiet success — the unit
             // would be created with a roster nobody can match.
-            say(n ? `${n} student${n !== 1 ? 's' : ''} loaded` +
-                    (notes.length ? ` (${notes.join(', ')})` : '')
-                  : 'no valid email addresses found', !n);
+            countEl.textContent = rosterParseSummary(r) +
+                (r.error === 'no email column found' ? ' — see the format note' : '');
+            countEl.style.color = r.error ? '#e94560' : '#0a7d0a';
         };
         reader.readAsText(file);
     }

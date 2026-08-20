@@ -103,6 +103,58 @@ class UnitRepository extends BaseRepository {
     );
   }
 
+  // Counts of the records a delete would take with it, so the teacher can be
+  // shown the blast radius before confirming rather than after.
+  countDependents(unitId) {
+    return this.get(
+      `SELECT
+         (SELECT COUNT(*) FROM unit_students        WHERE unit_id = ?) AS students,
+         (SELECT COUNT(*) FROM unit_roster          WHERE unit_id = ?) AS rostered,
+         (SELECT COUNT(*) FROM unit_teams           WHERE unit_id = ?) AS teams,
+         (SELECT COUNT(*) FROM unit_tutorial_slots  WHERE unit_id = ?) AS slots,
+         (SELECT COUNT(*) FROM unit_announcements   WHERE unit_id = ?) AS announcements`,
+      Array(5).fill(unitId)
+    );
+  }
+
+  // Delete a unit and everything hanging off it, in one transaction.
+  //
+  // SQLite foreign keys are not enforced on this connection, so nothing cascades
+  // by itself — every dependent table is listed here explicitly. Children are
+  // removed before parents so an interrupted run can never strand rows that are
+  // no longer reachable. `unit_team_members` and `proposal_votes` key off
+  // team/proposal ids rather than unit_id, hence the subqueries.
+  deleteCascade(unitId) {
+    this.db.tx(db => {
+      const byUnit = table => db.run(`DELETE FROM ${table} WHERE unit_id = ?`, [unitId]);
+
+      db.run(`DELETE FROM proposal_votes
+               WHERE proposal_id IN (SELECT proposal_id FROM proposals WHERE unit_id = ?)`, [unitId]);
+      byUnit('proposals');
+
+      db.run(`DELETE FROM unit_team_members
+               WHERE team_id IN (SELECT team_id FROM unit_teams WHERE unit_id = ?)`, [unitId]);
+      byUnit('unit_team_invites');
+      byUnit('unit_teams');
+
+      byUnit('student_unit_prefs');
+      byUnit('student_progress');
+      byUnit('unit_students');
+      byUnit('unit_roster');
+      byUnit('unit_tutorial_slots');
+      byUnit('unit_announcements');
+
+      // The outbox is a delivery audit log — what was actually sent stays true
+      // even once the unit is gone, so the rows are kept and only their pointer
+      // into the deleted notifications is cleared.
+      db.run(`UPDATE email_outbox SET notification_id = NULL
+               WHERE notification_id IN (SELECT id FROM notifications WHERE unit_id = ?)`, [unitId]);
+      byUnit('notifications');
+
+      db.run(`DELETE FROM units WHERE unit_id = ?`, [unitId]);
+    });
+  }
+
   updateRules(unitId, r) {
     this.run(
       `UPDATE units SET

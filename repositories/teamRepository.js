@@ -107,10 +107,14 @@ class TeamRepository extends BaseRepository {
   // tm.role is only ever written when the member row is created, and a student
   // joins a unit before visiting Preferences, so the stored copy is '' for
   // everyone who joined normally. tm.role remains the fallback for legacy rows.
+  //
+  // `tutorial_time` is the teacher's roster-imported time, kept alongside the
+  // student's saved `tutorial_slots` so validateTeam's `tutorialFallback` can
+  // reach it for students who never visited Preferences.
   getMembersDetailed(unitId, teamId) {
     return this.all(
       `SELECT tm.student_id, tm.status, us.name, us.is_new_to_qut,
-              sup.tutorial_slots,
+              sup.tutorial_slots, us.tutorial_time,
               COALESCE(NULLIF(sup.preferred_role, ''), tm.role) AS role
        FROM unit_team_members tm
        INNER JOIN unit_students us ON us.unit_id = ? AND us.student_id = tm.student_id

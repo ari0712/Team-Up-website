@@ -24,8 +24,38 @@
 
 <main class="t-main">
     <button class="t-add-unit-btn" onclick="window.location='/teacher/create-unit.html'">Add Unit +</button>
+    <!-- Hidden until there is something to delete; see loadUnits(). -->
+    <button class="t-delete-unit-btn" id="deleteUnitBtn" style="display:none"
+            onclick="openDeleteUnit()">Delete Unit</button>
     <div id="unitGrid" class="t-unit-grid"></div>
 </main>
+
+<!-- Delete Unit Modal -->
+<div class="t-modal-overlay" id="deleteUnitModal">
+    <div class="t-modal-box">
+        <h3 style="color:#c0392b">Delete Unit</h3>
+        <div class="t-modal-field">
+            <label>Which unit?</label>
+            <select id="du-unit" onchange="onDeleteUnitChanged()"></select>
+        </div>
+        <p style="font-size:14px;line-height:1.55;margin-bottom:10px">
+            This permanently deletes <strong id="du-unit-name"></strong> and everything in it.
+            <strong>This cannot be undone.</strong>
+        </p>
+        <ul id="du-impact" style="font-size:13px;line-height:1.7;margin:0 0 14px 18px;color:#555"></ul>
+        <div class="t-modal-field">
+            <label>Type the unit name to confirm</label>
+            <input type="text" id="du-confirm" placeholder="Unit name" autocomplete="off"
+                   oninput="syncDeleteButton()">
+        </div>
+        <p id="du-save-msg" class="t-save-msg"></p>
+        <div class="t-modal-actions">
+            <button class="t-modal-cancel" onclick="closeDeleteUnit()">Cancel</button>
+            <button class="t-modal-save" id="du-delete-btn" onclick="confirmDeleteUnit()"
+                    style="background:#c0392b">Delete Unit</button>
+        </div>
+    </div>
+</div>
 <script src="/assets/js/api.js"></script>
 <script>
     (async () => {
@@ -35,10 +65,17 @@
         loadUnits();
     })();
 
+    // Kept so the delete dialog can offer the same units the grid is showing
+    // without re-fetching them.
+    let allUnits = [];
+
     async function loadUnits() {
         const grid = document.getElementById('unitGrid');
         try {
             const units = await get('/api/units');
+            allUnits = units;
+            // Nothing to delete on an empty account, so the control stays hidden.
+            document.getElementById('deleteUnitBtn').style.display = units.length ? '' : 'none';
             if (units.length === 0) {
                 grid.innerHTML = '<p class="t-empty">No units yet. Click "Add Unit +" to create one.</p>';
                 return;
@@ -75,6 +112,95 @@
     }
 
 
+
+    // ── Delete Unit ─────────────────────────────────────────────────────
+    // Deletion is irreversible and takes the whole class with it, so the dialog
+    // names what will be destroyed and requires the unit name typed back before
+    // the button does anything. Home lists every unit, so the target is chosen
+    // here rather than inherited from the page.
+    let deleteTarget = null;
+
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c =>
+        ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[c]));
+
+    function openDeleteUnit() {
+        if (!allUnits.length) return;
+        const sel = document.getElementById('du-unit');
+        sel.innerHTML = allUnits.map(u =>
+            `<option value="${esc(u.unit_id)}">${esc(u.unit_name)}</option>`).join('');
+        // Set explicitly rather than leaning on the browser's implicit
+        // first-option default, so the target is never ambiguous.
+        sel.value = allUnits[0].unit_id;
+        document.getElementById('du-save-msg').textContent = '';
+        document.getElementById('deleteUnitModal').classList.add('open');
+        onDeleteUnitChanged();
+    }
+
+    async function onDeleteUnitChanged() {
+        const unitId = document.getElementById('du-unit').value;
+        deleteTarget = allUnits.find(u => u.unit_id === unitId) || null;
+        document.getElementById('du-unit-name').textContent = deleteTarget?.unit_name || '';
+        // Switching units invalidates anything already typed, so the gate resets.
+        document.getElementById('du-confirm').value = '';
+        document.getElementById('du-impact').innerHTML =
+            '<li style="color:#888">Checking what this would remove…</li>';
+        syncDeleteButton();
+        if (!deleteTarget) return;
+
+        try {
+            const i = await get(`/api/units/${unitId}/delete-impact`);
+            // A slower answer for a unit the teacher has since switched away from
+            // must not overwrite the current one.
+            if (deleteTarget?.unit_id !== unitId) return;
+            const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+            const lines = [
+                plural(i.students, 'enrolled student', 'enrolled students'),
+                plural(i.rostered, 'roster entry', 'roster entries'),
+                plural(i.teams, 'team', 'teams'),
+                plural(i.slots, 'tutorial slot', 'tutorial slots'),
+                plural(i.announcements, 'announcement', 'announcements'),
+            ];
+            document.getElementById('du-impact').innerHTML =
+                lines.map(l => `<li>${l}</li>`).join('') +
+                '<li>all preferences, progress and notifications for this unit</li>';
+        } catch (e) {
+            // Not knowing the counts must not block the delete itself — the
+            // typed confirmation is the real safeguard.
+            document.getElementById('du-impact').innerHTML =
+                '<li>every student, team, preference and announcement in this unit</li>';
+        }
+    }
+
+    function closeDeleteUnit() {
+        document.getElementById('deleteUnitModal').classList.remove('open');
+        deleteTarget = null;
+    }
+
+    // Enabled only on an exact match, so a mistyped or half-remembered name
+    // cannot destroy the wrong unit.
+    function syncDeleteButton() {
+        const typed = document.getElementById('du-confirm').value.trim();
+        const btn = document.getElementById('du-delete-btn');
+        const ok = !!deleteTarget && typed === deleteTarget.unit_name;
+        btn.disabled = !ok;
+        btn.style.background = ok ? '#c0392b' : '#aaa';
+        btn.style.cursor = ok ? 'pointer' : 'not-allowed';
+    }
+
+    async function confirmDeleteUnit() {
+        if (!deleteTarget) return;
+        if (document.getElementById('du-confirm').value.trim() !== deleteTarget.unit_name) return;
+        document.getElementById('du-delete-btn').disabled = true;
+        document.getElementById('du-save-msg').textContent = 'Deleting…';
+        try {
+            await del(`/api/units/${deleteTarget.unit_id}`);
+            closeDeleteUnit();
+            await loadUnits();
+        } catch (e) {
+            document.getElementById('du-save-msg').textContent = e.message;
+            syncDeleteButton();
+        }
+    }
 
     async function doLogout() {
         await post('/api/auth/logout', {});

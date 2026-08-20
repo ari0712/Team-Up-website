@@ -90,12 +90,29 @@ class StudentPortalService {
     return this.prefs.get(unitId, studentId) || null;
   }
 
+  // A student's preferences freeze the moment their team leaves FORMING — i.e.
+  // once it has been submitted for review, and permanently once approved. A
+  // rejected team is set back to FORMING (teamRepository.setRejected), which
+  // unlocks editing again so the student can act on the teacher's feedback.
+  arePrefsLocked(unitId, studentId) {
+    const membership = this.teams.findStudentTeam(unitId, studentId);
+    if (!membership) return false;
+    const status = this.teams.findById(membership.team_id)?.status;
+    return !!status && status !== 'FORMING';
+  }
+
   // Everything except preferredTeammates is required. Enforced here rather than
   // only in the page, because entering preferences marks a progress stage that
   // the teacher's readiness view and the team-formation flow both trust — an
   // empty save used to set that flag and make a student look ready when the
   // data the matching depends on did not exist.
   savePrefs(unitId, studentId, body) {
+    // Once the request is with the teacher, the preferences the team was built
+    // and validated against must stop moving underneath it. Approval keeps them
+    // locked rather than releasing them — an approved team is final.
+    if (this.arePrefsLocked(unitId, studentId))
+      throw new ServiceError('PREFS_LOCKED', 403);
+
     const { tutorialSlots, projectInterests, skills, preferredRole, preferredTeammates } = body;
     const csv = v => Array.isArray(v) ? v.join(',') : (v || '');
 
@@ -144,7 +161,13 @@ class StudentPortalService {
     }
     if (search) {
       const q = search.toLowerCase();
-      students = students.filter(s => s.name.toLowerCase().includes(q) || s.student_id.toLowerCase().includes(q));
+      // student_number is `users.student_id` — the n-number a student knows
+      // themselves by. s.student_id is their username. The search box offers
+      // both, so both have to be matched.
+      students = students.filter(s =>
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.student_id || '').toLowerCase().includes(q) ||
+        (s.student_number || '').toLowerCase().includes(q));
     }
     if (tutorial) students = students.filter(s => (s.tutorial_slots || s.tutorial_time || '').includes(tutorial));
     if (interest) students = students.filter(s => (s.project_interests || '').includes(interest));

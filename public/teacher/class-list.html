@@ -156,7 +156,7 @@
     <main class="t-dash-content">
         <div class="cl-search-row">
             <input id="search-input" class="cl-search-input" type="text"
-                   placeholder="Search by name or student ID…" oninput="applyFilters()">
+                   placeholder="Search by name, username or student ID…" oninput="applyFilters()">
             <select id="filter-stage" class="cl-filter-select" onchange="applyFilters()">
                 <option value="">All students</option>
                 <option value="read_rules">Read rules</option>
@@ -195,6 +195,21 @@
                          font-size:13px;box-sizing:border-box;resize:vertical"></textarea>
         <p id="roster-msg" class="t-save-msg" style="text-align:left"></p>
         <button class="t-open-btn" style="margin-top:6px" onclick="addToRoster()">Add to Class List</button>
+
+        <!-- Uploads are additive and repeatable: existing students are kept, and
+             anyone already listed is updated rather than duplicated. -->
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid #d0dff0">
+            <p style="font-size:12px;color:#5a7a9a;line-height:1.5;margin-bottom:8px">
+                Or upload another student file. Students already in the unit are kept —
+                new addresses are added and existing ones updated.
+            </p>
+            <button class="t-open-btn" onclick="document.getElementById('rosterFile').click()">
+                Upload Student File (.CSV)
+            </button>
+            <input type="file" id="rosterFile" accept=".csv" style="display:none"
+                   onchange="onRosterFileSelected(this)">
+            <p id="roster-file-msg" class="t-save-msg" style="text-align:left"></p>
+        </div>
     </aside>
 </div>
 
@@ -207,6 +222,7 @@
 </div>
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/teacher-nav.js"></script>
+<script src="/assets/js/roster-csv.js"></script>
 <script>
     const params = new URLSearchParams(location.search);
     const unitId = params.get('unitId');
@@ -282,10 +298,57 @@
                 students: emails.map(email => ({ email }))
             });
             msg.style.color = '#22c55e';
-            msg.textContent = `Added ${r.added}${r.skipped ? `, skipped ${r.skipped} invalid` : ''}.`;
+            msg.textContent = importSummary(r);
             box.value = '';
             await loadRoster();
         } catch(e) { msg.style.color = '#e94560'; msg.textContent = e.message; }
+    }
+
+    // Says what the import actually did. "Updated" matters here: re-uploading a
+    // file is a normal way to refresh details, and reporting 0 added would read
+    // as a failure.
+    function importSummary(r) {
+        const parts = [];
+        if (r.added)   parts.push(`added ${r.added}`);
+        if (r.updated) parts.push(`updated ${r.updated}`);
+        if (r.skipped) parts.push(`skipped ${r.skipped} invalid`);
+        const done = parts.length ? parts.join(', ') : 'no changes';
+        return `${done.charAt(0).toUpperCase()}${done.slice(1)}. ${r.total} on the class list.`;
+    }
+
+    // Uploading is additive — the endpoint upserts by email and never deletes,
+    // so this can be repeated as often as the teacher needs.
+    function onRosterFileSelected(input) {
+        const file = input.files[0];
+        const msg = document.getElementById('roster-file-msg');
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = async e => {
+            const parsed = parseRosterCsv(e.target.result);
+            if (parsed.error) {
+                msg.style.color = '#e94560';
+                msg.textContent = `${file.name}: ${parsed.error}.`;
+                input.value = '';
+                return;
+            }
+            msg.style.color = '#5a7a9a';
+            msg.textContent = `Uploading ${rosterParseSummary(parsed)}…`;
+            try {
+                const r = await post(`/api/units/${unitId}/roster`, { students: parsed.students });
+                msg.style.color = '#22c55e';
+                msg.textContent = importSummary(r);
+                await loadRoster();
+                await loadStudents();
+            } catch (err) {
+                msg.style.color = '#e94560';
+                msg.textContent = err.message;
+            } finally {
+                // Cleared so re-picking the same file fires onchange again.
+                input.value = '';
+            }
+        };
+        reader.readAsText(file);
     }
 
     async function removeFromRoster(email) {
@@ -309,13 +372,20 @@
         }
     }
 
+    // The student number from the account or roster; falls back to the username,
+    // which is what identifies accounts that never got a number recorded.
+    const studentNumberOf = s => s.student_number || s.student_id || '';
+
     function applyFilters() {
         const search = document.getElementById('search-input').value.toLowerCase();
         const stage  = document.getElementById('filter-stage').value;
         filteredStudents = allStudents.filter(s => {
-            const nameMatch = (s.name || s.student_id).toLowerCase().includes(search);
+            // student_id is the username; student_number is the n-number. The
+            // box offers both, so both are matched.
+            const match = [s.name, s.student_id, s.student_number]
+                .some(v => (v || '').toLowerCase().includes(search));
             const stageMatch = !stage || s[stage] == 1;
-            return nameMatch && stageMatch;
+            return match && stageMatch;
         });
         currentPage = 1;
         renderPage();
@@ -381,8 +451,15 @@
 
     function viewProfile(s) {
         document.getElementById('modal-body').innerHTML = `
-            <h3>${s.name || s.student_id}</h3>
-            <p style="font-size:13px;color:#888;margin-bottom:14px">ID: ${s.student_id}</p>
+            <h3>${escapeHtml(s.name || s.student_id)}</h3>
+            <p style="font-size:13px;color:#888;margin-bottom:14px">
+                Student ID: ${escapeHtml(studentNumberOf(s))}${
+                    // Only worth showing when it differs — otherwise it stutters
+                    // ("Student ID: ari · username: ari").
+                    studentNumberOf(s) !== s.student_id
+                        ? `<span style="color:#aaa"> &middot; username: ${escapeHtml(s.student_id)}</span>`
+                        : ''}
+            </p>
             <div class="cl-modal-field"><strong>Tutorial time:</strong> ${s.tutorial_time || s.tutorial_slots || '—'}</div>
             <div class="cl-modal-field"><strong>Degree:</strong> ${s.degree || '—'}</div>
             <div class="cl-modal-field"><strong>Major:</strong> ${s.major || '—'}</div>

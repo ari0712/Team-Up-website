@@ -36,6 +36,14 @@
             margin-bottom: 6px;
             font-weight: 800;
         }
+        /* Sits inside the name heading, so it is toned down to keep the name dominant.
+           Mirrors .classmate-id on the classmate profile page. */
+        .profile-id {
+            font-size: 13px;
+            font-weight: 600;
+            color: #666;
+            white-space: nowrap;
+        }
         .profile-role {
             font-size: 13px;
             font-weight: 600;
@@ -136,10 +144,16 @@
         return trimmed && trimmed !== 'None' ? trimmed : fallback;
     };
 
+    // Returns HTML, not text — the id is toned down so the name stays dominant.
+    // `users.student_id` is blank for accounts that signed up before it existed,
+    // and the username is the student id in that case (as my-team.html assumes).
+    // When the id and the name are the same string, showing both reads as a stutter.
     function formatStudentHeading(user) {
         const name = user.displayName || user.username || 'Student';
-        const studentNumber = user.studentId || user.student_id || '';
-        return studentNumber && studentNumber !== name ? `${name} ${studentNumber}` : name;
+        const studentNumber = user.studentId || user.student_id || user.username || '';
+        return escapeHtml(name) + (studentNumber && studentNumber !== name
+            ? `<span class="profile-id"> – Student ID: ${escapeHtml(studentNumber)}</span>`
+            : '');
     }
 
     function renderSection(title, values) {
@@ -172,7 +186,7 @@
         const title = `${studentName}'s Profile`;
         document.title = `${title} - TeamUp`;
         document.getElementById('page-title').textContent = title;
-        document.getElementById('profile-heading').textContent = formatStudentHeading(nav.user);
+        document.getElementById('profile-heading').innerHTML = formatStudentHeading(nav.user);
 
         const unit = await requireUnitAccess(unitId);
         if (!unit) return;

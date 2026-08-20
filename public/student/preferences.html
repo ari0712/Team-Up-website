@@ -28,6 +28,14 @@
         /* A section the student still has to fill in */
         .pref-section.pref-invalid { border-color:#e94560;box-shadow:0 0 0 3px rgba(233,69,96,.10) }
 
+        /* Shown once the team request is with the teacher — see applyPrefsLock(). */
+        .pref-locked-banner { grid-column:1/-1;background:#fdf3f3;border:1.5px solid #d03b3b;
+                              border-radius:12px;padding:14px 18px;margin-bottom:4px;display:none }
+        .pref-locked-banner.show { display:block }
+        /* A locked section should read as inert, not merely unresponsive. */
+        .pref-section.pref-locked { background:#f7f9fc }
+        .pref-section.pref-locked label { cursor:default;color:#666 }
+
         .pref-msg { border-radius:10px;padding:12px 16px;font-size:14px;font-weight:600;
                     margin-top:10px;line-height:1.5;display:none }
         .pref-msg.error   { background:#fff0f3;border:1.5px solid #e94560;color:#a8253a }
@@ -49,6 +57,10 @@
     <nav class="t-sidebar-nav" id="student-sidebar"></nav>
     <div style="flex:1;overflow-y:auto">
         <div class="pref-layout">
+            <div class="pref-locked-banner" id="locked-banner">
+                <div style="font-size:15px;font-weight:800;color:#a82f2f">🔒 <span id="locked-title"></span></div>
+                <div style="font-size:13px;color:#7a3a48;margin-top:4px;line-height:1.55" id="locked-detail"></div>
+            </div>
             <!-- Left column -->
             <div>
                 <div class="pref-section" id="section-tutorial">
@@ -72,7 +84,7 @@
                         <label><input type="checkbox" name="interest" value="Business Analysis"> Business Analysis</label>
                     </div>
                 </div>
-                <button class="t-open-btn" onclick="savePrefs()" style="width:220px;margin-top:8px">Save Preferences</button>
+                <button class="t-open-btn" id="save-btn" onclick="savePrefs()" style="width:220px;margin-top:8px">Save Preferences</button>
                 <div id="save-msg" class="pref-msg"></div>
             </div>
             <!-- Right column -->
@@ -125,6 +137,10 @@
     // slots — otherwise there is nothing to tick and the student could never
     // save. Mirrors the same exemption on the server.
     let tutorialRequired = false;
+    // Set once the student's team has left FORMING. The server refuses the save
+    // regardless (studentPortalService.arePrefsLocked); this only makes the form
+    // reflect that instead of inviting edits that cannot be kept.
+    let prefsLocked = false;
 
     (async () => {
         const nav = await initStudentNav({ activeItem: 'preferences', pageTitle: 'My Preference' });
@@ -187,7 +203,42 @@
             if (roleEl) roleEl.checked = true;
             document.getElementById('preferred-teammates').value = prefs.preferred_teammates === 'None' ? '' : (prefs.preferred_teammates || '');
         }
+
+        // Last, so it also disables the tutorial checkboxes built above.
+        // Advisory only — a failure here must not leave the form unusable, and
+        // the server is the real guard either way.
+        const myTeam = await get(`/api/student/units/${unitId}/my-team`).catch(() => null);
+        applyPrefsLock(myTeam?.team?.status);
     })();
+
+    // A team that leaves FORMING has been handed to the teacher, so the details
+    // it was validated against are frozen. APPROVED is permanent; a rejected team
+    // goes back to FORMING and this unlocks again.
+    function applyPrefsLock(teamStatus) {
+        if (!teamStatus || teamStatus === 'FORMING') return;
+        prefsLocked = true;
+
+        const approved = teamStatus === 'APPROVED';
+        document.getElementById('locked-title').textContent = approved
+            ? 'Your team has been approved'
+            : 'Your team request is with your teacher';
+        document.getElementById('locked-detail').textContent = approved
+            ? 'Your preferences are now final and can no longer be changed.'
+            : 'Your preferences are locked so your team is reviewed against the details it was ' +
+              'built from. If your teacher sends the request back, you can edit them again.';
+        document.getElementById('locked-banner').classList.add('show');
+
+        document.querySelectorAll('.pref-layout input').forEach(el => { el.disabled = true; });
+        document.querySelectorAll('.pref-section').forEach(el => el.classList.add('pref-locked'));
+
+        const btn = document.getElementById('save-btn');
+        btn.disabled = true;
+        btn.style.background = '#aaa';
+        btn.style.cursor = 'not-allowed';
+        btn.title = approved
+            ? 'Your team has been approved, so preferences can no longer be changed.'
+            : 'Your team request is awaiting teacher review.';
+    }
 
     function showMessage(kind, text) {
         const msg = document.getElementById('save-msg');
@@ -206,6 +257,7 @@
     }
 
     async function savePrefs() {
+        if (prefsLocked) return;
         const tutorialSlots     = [...document.querySelectorAll('input[name="tutorial"]:checked')].map(e => e.value);
         const projectInterests  = [...document.querySelectorAll('input[name="interest"]:checked')].map(e => e.value);
         const skills            = [...document.querySelectorAll('input[name="skill"]:checked')].map(e => e.value);
@@ -238,6 +290,15 @@
                 { tutorialSlots, projectInterests, skills, preferredRole, preferredTeammates });
             showMessage('success', 'Preferences saved successfully.');
         } catch (e) {
+            // The team can be submitted from another tab while this page sits
+            // open, so the lock may only show up at save time. Catch up rather
+            // than printing the bare code.
+            if (e.message === 'PREFS_LOCKED') {
+                const myTeam = await get(`/api/student/units/${unitId}/my-team`).catch(() => null);
+                applyPrefsLock(myTeam?.team?.status || 'SUBMITTED');
+                showMessage('error', 'Your team request has been submitted, so your preferences are now locked.');
+                return;
+            }
             // A server-side rejection must not look like a silent failure.
             showMessage('error', e.message);
         }

@@ -31,6 +31,13 @@ module.exports = function createUnitsRouter({ unitService, matchingService }) {
   router.post('/', requireTeacher, (req, res) =>
     send(res, () => res.json(svc.createUnit(username(req), req.body))));
 
+  // Read-only preview of what deleting this unit would remove.
+  router.get('/:unitId/delete-impact', requireTeacher, (req, res) =>
+    send(res, () => res.json(svc.getDeleteImpact(req.params.unitId, username(req)))));
+
+  router.delete('/:unitId', requireTeacher, (req, res) =>
+    send(res, () => res.json(svc.deleteUnit(req.params.unitId, username(req)))));
+
   // ── Progress ────────────────────────────────────────────────────
   router.get('/:unitId/progress', requireTeacher, (req, res) =>
     send(res, () => res.json(svc.getProgress(req.params.unitId, username(req)))));
