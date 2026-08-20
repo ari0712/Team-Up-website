@@ -11,6 +11,9 @@
         .s-search-bar input { flex:1;min-width:180px }
         .s-teammate-card { background:#fff;border-radius:12px;padding:18px 20px;border:1.5px solid #d0dff0;margin-bottom:12px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px }
         .s-teammate-info h3 { font-size:20px;font-weight:800;margin-bottom:4px }
+        /* Sits inside the name heading, toned down so the name stays dominant.
+           Mirrors .classmate-id / .profile-id on the two profile pages. */
+        .s-teammate-id { font-size:13px;font-weight:600;color:#666;white-space:nowrap }
         .s-teammate-info p  { font-size:13px;color:#666 }
         .s-match-reasons { font-size:13px;color:#555;line-height:1.9 }
         .s-match-reasons span { display:block }
@@ -135,7 +138,12 @@
         const interest = document.getElementById('filter-interest').value;
         const skill    = document.getElementById('filter-skill').value;
         let filtered = allStudents;
-        if (search)   filtered = filtered.filter(s => s.name.toLowerCase().includes(search) || s.student_id.toLowerCase().includes(search));
+        // student_number is the n-number; student_id is the username. The box
+        // offers both, so both are matched.
+        if (search)   filtered = filtered.filter(s =>
+            (s.name || '').toLowerCase().includes(search) ||
+            (s.student_id || '').toLowerCase().includes(search) ||
+            (s.student_number || '').toLowerCase().includes(search));
         if (tutorial) filtered = filtered.filter(s => (s.tutorial_slots || s.tutorial_time || '').includes(tutorial));
         if (interest) filtered = filtered.filter(s => (s.project_interests || '').includes(interest));
         if (skill)    filtered = filtered.filter(s => (s.skills || '').includes(skill));
@@ -149,10 +157,16 @@
             const skills  = (s.skills || '').split(',').filter(Boolean);
             const interests = (s.project_interests || '').split(',').filter(Boolean);
             const tutorial = s.tutorial_slots || s.tutorial_time || '';
+            // Confirms a student-ID search actually landed on the right person.
+            // Falls back to the username when the account has no n-number, and
+            // is dropped when it would just repeat the heading.
+            const heading = s.name || s.student_id;
+            const idLabel = s.student_number || s.student_id || '';
             return `
       <div class="s-teammate-card">
         <div class="s-teammate-info">
-          <h3>${s.name || s.student_id}</h3>
+          <h3>${esc(heading)}${idLabel && idLabel !== heading
+              ? `<span class="s-teammate-id"> – Student ID: ${esc(idLabel)}</span>` : ''}</h3>
           <p>${s.preferred_role || 'Role not set'}</p>
           <div class="s-match-reasons" style="margin-top:8px">
             ${tutorial ? `<span>⭐ Tutorial: ${tutorial.split(',')[0]}</span>` : ''}

@@ -50,6 +50,41 @@ class UnitService {
     return this._ownedOr404(unitId, teacherId);
   }
 
+  // Auto-create tutorial slots for any label seen in an import that the unit
+  // does not have yet. Shared by unit creation and later roster top-ups so a
+  // student imported in the second batch is not left with a tutorial time the
+  // unit has no matching slot for.
+  _ensureTutorialSlots(unitId, entries) {
+    const slotSet = new Set();
+    for (const s of entries || []) {
+      (s.tutorial_time || '').split(',').map(x => x.trim())
+        .filter(Boolean).forEach(x => slotSet.add(x));
+    }
+    if (!slotSet.size) return;
+    let nextOrder = this.slots.nextSortOrder(unitId);
+    for (const label of [...slotSet].sort()) {
+      if (this.slots.existsByLabel(unitId, label)) continue;
+      this.slots.create(crypto.randomUUID(), unitId, label, nextOrder++);
+    }
+  }
+
+  // What a delete would remove. Read-only, so the confirmation dialog can name
+  // real numbers instead of a generic warning.
+  getDeleteImpact(unitId, teacherId) {
+    const unit = this._ownedOr404(unitId, teacherId);
+    return { unitName: unit.unit_name, ...this.units.countDependents(unitId) };
+  }
+
+  // Permanently removes a unit and every record scoped to it. Ownership-checked
+  // like every other teacher action, so a unit can only ever be deleted by the
+  // teacher who created it.
+  deleteUnit(unitId, teacherId) {
+    const unit = this._ownedOr404(unitId, teacherId);
+    const removed = this.units.countDependents(unitId);
+    this.units.deleteCascade(unitId);
+    return { ok: true, unitName: unit.unit_name, removed };
+  }
+
   createUnit(teacherId, body) {
     const {
       unitName, description, semester, deadline,
@@ -91,21 +126,7 @@ class UnitService {
       // roster attributes are copied onto their unit_students row.
       imported = this.roster.upsertMany(unitId, roster, new Date().toISOString());
 
-      // Auto-create tutorial slots for any new labels seen in the import. The
-      // class list is email-only today, so this stays dormant until the richer
-      // spreadsheet arrives and starts carrying tutorial_time.
-      const slotSet = new Set();
-      roster.forEach(s => {
-        (s.tutorial_time || '').split(',').map(x => x.trim())
-          .filter(Boolean).forEach(x => slotSet.add(x));
-      });
-      if (slotSet.size > 0) {
-        let nextOrder = this.slots.nextSortOrder(unitId);
-        for (const label of [...slotSet].sort()) {
-          if (this.slots.existsByLabel(unitId, label)) continue;
-          this.slots.create(crypto.randomUUID(), unitId, label, nextOrder++);
-        }
-      }
+      this._ensureTutorialSlots(unitId, roster);
     }
 
     // `ignored` tells the caller how many submitted rows carried no usable
@@ -237,8 +258,16 @@ class UnitService {
     if (!Array.isArray(students) || !students.length)
       throw new ServiceError('Provide at least one student', 400);
     const result = this.roster.upsertMany(unitId, students, new Date().toISOString());
-    if (!result.added)
+    // Re-uploading a file whose students are all on the roster already is a
+    // successful no-op, not an empty import — only a batch that matched nothing
+    // at all is an error.
+    if (!result.added && !result.updated)
       throw new ServiceError('No valid email addresses found', 400);
+
+    // A top-up can introduce tutorial times the unit has no slot for yet. Same
+    // rule createUnit applies to the first import, so both paths agree.
+    this._ensureTutorialSlots(unitId, students);
+
     return { ok: true, ...result, total: this.roster.countForUnit(unitId) };
   }
 

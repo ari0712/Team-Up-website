@@ -33,6 +33,13 @@
             color: #1a2a4a;
             margin-bottom: 8px;
         }
+        /* Sits inside the name heading, so it is toned down to keep the name dominant. */
+        .classmate-id {
+            font-size: 13px;
+            font-weight: 600;
+            color: #666;
+            white-space: nowrap;
+        }
         .classmate-role {
             font-size: 13px;
             font-weight: 600;
@@ -254,7 +261,12 @@
         document.getElementById('classmate-card').innerHTML = `
             <div class="classmate-grid">
                 <div>
-                    <h2 class="classmate-name">${escapeHtml(classmate.name || classmate.student_id)}</h2>
+                    <h2 class="classmate-name">${escapeHtml(classmate.name || classmate.student_id)}${
+                        // Skip the suffix when the heading already IS the id (no name on the
+                        // roster), which would otherwise read "alex – Student ID: alex".
+                        classmate.name
+                            ? `<span class="classmate-id"> – Student ID: ${escapeHtml(classmate.student_id)}</span>`
+                            : ''}</h2>
                     <p class="classmate-role">Preferred Role: ${escapeHtml(classmate.preferred_role || 'Not set')}</p>
                     ${renderSection('Tutorial Availability', mateTutorials)}
                     ${renderSection('Interests', mateInterests)}

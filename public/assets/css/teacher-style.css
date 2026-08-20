@@ -90,6 +90,9 @@ body.t-page {
    span the full width, the first row would run underneath it. Scoped to the page
    that actually has the button, so Student Home gains no stray gap. */
 .t-add-unit-btn + .t-unit-grid { margin-top: 56px; }
+/* Two stacked buttons in the corner need the grid pushed further down. Matches
+   on the delete button even while it is hidden, so the gap does not jump. */
+.t-delete-unit-btn + .t-unit-grid { margin-top: 104px; }
 
 .t-add-unit-btn {
     position: absolute;
@@ -106,6 +109,24 @@ body.t-page {
     transition: background 0.15s;
 }
 .t-add-unit-btn:hover { background: #2a2a4a; }
+
+/* Sits directly under Add Unit +, same shape and corner, but outlined in red
+   rather than filled — it must not read as the equal twin of the primary action. */
+.t-delete-unit-btn {
+    position: absolute;
+    top: 80px;
+    right: 32px;
+    background: #fff;
+    color: #c0392b;
+    border: 1.5px solid #c0392b;
+    border-radius: 8px;
+    padding: 12px 24px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.t-delete-unit-btn:hover { background: #fdecea; }
 
 .t-unit-card {
     background: #ffffff;
