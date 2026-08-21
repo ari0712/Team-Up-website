@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Full Profile - TeamUp</title>
+    <link rel="stylesheet" href="/assets/css/style1.css">
+    <link rel="stylesheet" href="/assets/css/teacher-style.css">
+    <style>
+        body.t-page { min-height: 100vh; height: auto; overflow: visible; }
+        .t-dashboard-layout { min-height: auto; }
+        .fp-shell { flex: 1; min-width: 0; background: #d3ecf5; padding: 34px 48px 40px; }
+        .fp-card {
+            background: #fff; border-radius: 8px; padding: 30px 48px 34px;
+            color: #2a3a4a; max-width: 860px; height: auto;
+        }
+
+        /* Identity header */
+        .fp-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 6px }
+        .fp-avatar, .fp-initials {
+            width: 96px; height: 96px; border-radius: 50%; flex-shrink: 0;
+            object-fit: cover; border: 2px solid #d0dff0; background: #eef4ff;
+        }
+        .fp-initials {
+            display: flex; align-items: center; justify-content: center;
+            font-size: 32px; font-weight: 800; color: #2663ff; letter-spacing: 1px;
+        }
+        .fp-name { font-size: 22px; font-weight: 800; color: #1a2a4a; margin-bottom: 4px }
+        .fp-id { font-size: 13px; font-weight: 600; color: #666; white-space: nowrap }
+        .fp-role { font-size: 13px; font-weight: 600; color: #555 }
+        .fp-tags { font-size: 12px; color: #777; margin-top: 6px; line-height: 1.6 }
+
+        .fp-divider { border: none; border-top: 1px solid #e6eef8; margin: 22px 0 }
+
+        /* One About Me answer */
+        .fp-section { margin-bottom: 24px }
+        .fp-section-title {
+            background: #7ec8e3; border-radius: 8px; padding: 7px 14px; display: inline-block;
+            font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 10px;
+        }
+        .fp-prose { font-size: 14px; line-height: 1.65; color: #333; white-space: normal }
+        .fp-prose p { margin: 0 0 10px }
+        .fp-prose p:last-child { margin-bottom: 0 }
+        /* A blank answer stays visible and greyed: an absent section reads as a
+           broken page, an explicit "not filled in" reads as a choice. */
+        .fp-empty { font-size: 14px; color: #999; font-style: italic }
+
+        /* Edit mode */
+        .fp-textarea {
+            width: 100%; box-sizing: border-box; min-height: 96px; resize: vertical;
+            border: 1.5px solid #d0dff0; border-radius: 8px; padding: 10px 12px;
+            font-size: 14px; font-family: inherit; line-height: 1.6; outline: none;
+        }
+        .fp-textarea:focus { border-color: #2663ff }
+        .fp-count { font-size: 12px; color: #999; margin-top: 4px; text-align: right }
+        .fp-count.over { color: #e94560; font-weight: 700 }
+        .fp-actions { display: flex; gap: 12px; margin-top: 26px; flex-wrap: wrap }
+        .fp-photo-controls {
+            margin-top: 12px; padding-top: 10px; border-top: 1px solid #eef4fb;
+        }
+        .fp-photo-label {
+            display: block; font-size: 12px; font-weight: 800; letter-spacing: .3px;
+            text-transform: uppercase; color: #1a2a4a; margin-bottom: 6px;
+        }
+        .fp-photo-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
+        .fp-photo-note { font-size: 12px; color: #777; margin-top: 6px; line-height: 1.5 }
+        .fp-photo-note.warn { color: #c0392b; font-weight: 600 }
+        .fp-btn-sm {
+            background: #fff; color: #2663ff; border: 1.5px solid #2663ff; border-radius: 8px;
+            padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
+        }
+        .fp-btn-sm.danger { color: #c0392b; border-color: #c0392b }
+        .fp-msg { font-size: 13px; font-weight: 600; margin-top: 12px; min-height: 18px }
+        .fp-hint { font-size: 12px; color: #5a7a9a; line-height: 1.55; margin-bottom: 18px }
+    </style>
+</head>
+<body class="t-page">
+<header class="t-header">
+    <button class="t-logout-btn" onclick="studentLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">Full Profile</h1>
+        <p>Welcome, <span id="welcome-name"></span>!</p>
+    </div>
+    <a class="logo" href="#"><img class="logo-icon" src="/assets/img/teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span></a>
+</header>
+<div class="t-divider"></div>
+<div class="t-dashboard-layout">
+    <nav class="t-sidebar-nav" id="student-sidebar"></nav>
+    <main class="fp-shell">
+        <section class="fp-card" id="fp-card">
+            <p style="color:#888">Loading…</p>
+        </section>
+    </main>
+</div>
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/student-nav.js"></script>
+<script>
+    let unitId, viewedId, profile;
+    let editing = false;
+    // Where the student came from. Drives both the highlighted sidebar item and
+    // the Back button: this page is reachable from three places, and landing on
+    // it should not move you somewhere else in the nav. Carried in the URL
+    // because the sidebar is built before we know whose profile this is.
+    let origin = 'profile';
+    // Held until Save so the photo and the text commit together. `null` means
+    // untouched; '' means the student asked to remove it.
+    let pendingAvatar = null;
+
+    // The three places this page is reached from. Keys double as sidebar nav
+    // keys, so the item you arrived through stays highlighted.
+    const ORIGINS = {
+        'profile':        { href: '/student/profile.html',        back: 'Back to My Profile' },
+        'find-teammates': { href: '/student/find-teammates.html', back: 'Back to Find Teammates' },
+        'my-team':        { href: '/student/my-team.html',        back: 'Back to My Team' },
+    };
+
+    const esc = value => String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+
+    // Escaping alone would collapse the student's paragraphs into one block, so
+    // blank lines become paragraph breaks and single newlines become <br>.
+    function prose(text) {
+        const paragraphs = esc(text).split(/\n{2,}/)
+            .map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+        return `<div class="fp-prose">${paragraphs}</div>`;
+    }
+
+    function initials(name) {
+        const parts = String(name || '?').trim().split(/\s+/).filter(Boolean);
+        return ((parts[0]?.[0] || '?') + (parts.length > 1 ? parts[parts.length - 1][0] : ''))
+            .toUpperCase();
+    }
+
+    // A missing file does NOT 404 here — the server's catch-all returns index.html
+    // with a 200 — so a broken image has to be caught with onerror rather than by
+    // checking the response.
+    function avatarHtml(src, name) {
+        if (!src) return `<div class="fp-initials">${esc(initials(name))}</div>`;
+        return `<img class="fp-avatar" src="${esc(src)}" alt=""
+                     onerror="this.outerHTML='&lt;div class=&quot;fp-initials&quot;&gt;${esc(initials(name))}&lt;/div&gt;'">`;
+    }
+
+    function tagLine(label, csv) {
+        const items = String(csv || '').split(',').map(s => s.trim()).filter(Boolean);
+        if (!items.length) return '';
+        return `<div class="fp-tags"><strong>${esc(label)}:</strong> ${esc(items.join(' · '))}</div>`;
+    }
+
+    // Photo controls, spelled out rather than left as two bare buttons.
+    //
+    // Removing is staged like everything else on this page — it only takes
+    // effect on Save — so the pending state has to say so out loud, and has to
+    // be undoable without throwing away unsaved text via Cancel.
+    function photoControlsHtml(src) {
+        const removalPending = pendingAvatar === '';
+        const newPhotoPicked = !!pendingAvatar;
+
+        let note;
+        if (removalPending)      note = 'Your photo will be removed when you save — your initials are shown instead.';
+        else if (newPhotoPicked) note = 'New photo ready — choose Save Changes to keep it.';
+        else if (src)            note = 'JPEG or PNG. Removing your photo goes back to your initials.';
+        else                     note = 'No photo yet — your initials are shown instead. JPEG or PNG.';
+
+        return `
+      <div class="fp-photo-controls">
+        <span class="fp-photo-label">Profile photo</span>
+        <div class="fp-photo-actions">
+          <button class="fp-btn-sm" onclick="document.getElementById('fp-photo').click()">
+            ${src ? 'Change photo' : 'Add photo'}</button>
+          ${src ? `<button class="fp-btn-sm danger" onclick="removePhoto()">Remove photo</button>` : ''}
+          ${removalPending && profile.avatarPath
+            ? `<button class="fp-btn-sm" onclick="undoRemovePhoto()">Undo remove</button>` : ''}
+          <input type="file" id="fp-photo" accept="image/jpeg,image/png" style="display:none"
+                 onchange="onPhotoChosen(this)">
+        </div>
+        <div class="fp-photo-note${removalPending ? ' warn' : ''}">${esc(note)}</div>
+      </div>`;
+    }
+
+    function headerHtml() {
+        const src = pendingAvatar !== null ? pendingAvatar : profile.avatarPath;
+        return `
+      <div class="fp-head">
+        ${avatarHtml(src, profile.name)}
+        <div style="min-width:0">
+          <div class="fp-name">${esc(profile.name)}${
+              profile.studentNumber && profile.studentNumber !== profile.name
+                  ? `<span class="fp-id"> – Student ID: ${esc(profile.studentNumber)}</span>` : ''}</div>
+          <div class="fp-role">Preferred Role: ${esc(profile.preferredRole || 'Not set')}</div>
+          ${tagLine('Tutorial availability', profile.tutorialSlots)}
+          ${tagLine('Skills', profile.skills)}
+          ${tagLine('Interests', profile.projectInterests)}
+          ${editing ? photoControlsHtml(src) : ''}
+        </div>
+      </div>`;
+    }
+
+    function render() {
+        const backHref = `${ORIGINS[origin].href}?unitId=${unitId}`;
+
+        const body = profile.about.map(field => `
+      <div class="fp-section">
+        <div class="fp-section-title">${esc(field.label)}</div>
+        ${editing ? `
+          <textarea class="fp-textarea" id="fld-${esc(field.key)}" maxlength="2000"
+                    oninput="updateCount('${esc(field.key)}')"
+                    placeholder="Optional — leave blank if you'd rather not say.">${esc(field.value)}</textarea>
+          <div class="fp-count" id="cnt-${esc(field.key)}"></div>`
+          : (field.value.trim()
+              ? prose(field.value)
+              : `<div class="fp-empty">Not filled in yet</div>`)}
+      </div>`).join('');
+
+        document.getElementById('fp-card').innerHTML = `
+      ${headerHtml()}
+      <hr class="fp-divider">
+      ${editing
+          ? `<p class="fp-hint">Every question below is optional — fill in what you want your
+               classmates to know and leave the rest blank. This stays editable even after your
+               team is submitted.</p>`
+          : ''}
+      ${body}
+      <div class="fp-actions">
+        ${editing ? `
+          <button class="t-open-btn" style="width:180px" onclick="save()">Save Changes</button>
+          <button class="t-open-btn" style="width:140px;background:#888" onclick="cancelEdit()">Cancel</button>`
+        : `
+          ${profile.isSelf
+            ? `<button class="t-open-btn" style="width:180px" onclick="startEdit()">Edit My Profile</button>`
+            : ''}
+          <button class="t-open-btn" style="width:190px;background:#1a2a4a"
+                  onclick="window.location='${backHref}'">${esc(ORIGINS[origin].back)}</button>`}
+      </div>
+      <div class="fp-msg" id="fp-msg"></div>`;
+
+        if (editing) profile.about.forEach(f => updateCount(f.key));
+    }
+
+    function updateCount(key) {
+        const box = document.getElementById(`fld-${key}`);
+        const out = document.getElementById(`cnt-${key}`);
+        if (!box || !out) return;
+        const n = box.value.length;
+        out.textContent = `${n} / 2000`;
+        out.classList.toggle('over', n >= 2000);
+    }
+
+    function message(text, kind) {
+        const el = document.getElementById('fp-msg');
+        if (!el) return;
+        el.textContent = text;
+        el.style.color = kind === 'error' ? '#e94560' : kind === 'ok' ? '#22c55e' : '#5a7a9a';
+    }
+
+    function startEdit() { editing = true; pendingAvatar = null; render(); }
+
+    function cancelEdit() {
+        editing = false;
+        pendingAvatar = null;   // discards an unsaved photo along with unsaved text
+        render();
+    }
+
+    function removePhoto() {
+        pendingAvatar = '';
+        render();
+        message('Photo will be removed when you save.', 'info');
+    }
+
+    // Reverts a staged removal without discarding unsaved text, which is what
+    // Cancel would cost. null means "leave the stored photo alone".
+    function undoRemovePhoto() {
+        pendingAvatar = null;
+        render();
+        message('Your photo will be kept.', 'info');
+    }
+
+    // Downscale in the browser so a 5 MB phone photo becomes ~20 KB before it is
+    // ever sent. Keeps the upload inside the JSON transport in api.js — no
+    // multipart handling, and no huge bodies to police server-side.
+    function onPhotoChosen(input) {
+        const file = input.files[0];
+        input.value = '';                    // so re-picking the same file re-fires
+        if (!file) return;
+        if (!/^image\/(jpeg|png)$/.test(file.type)) {
+            message('Please choose a JPEG or PNG image.', 'error');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onerror = () => message('That image could not be read.', 'error');
+        reader.onload = e => {
+            const img = new Image();
+            img.onerror = () => message('That image could not be read.', 'error');
+            img.onload = () => {
+                const SIZE = 256;
+                const canvas = document.createElement('canvas');
+                canvas.width = canvas.height = SIZE;
+                // Centre-crop to a square so portraits are not squashed.
+                const side = Math.min(img.width, img.height);
+                canvas.getContext('2d').drawImage(
+                    img, (img.width - side) / 2, (img.height - side) / 2, side, side,
+                    0, 0, SIZE, SIZE);
+                pendingAvatar = canvas.toDataURL('image/jpeg', 0.8);
+                render();
+                message('Photo ready — choose Save Changes to keep it.', 'info');
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    async function save() {
+        const body = {};
+        for (const field of profile.about) {
+            body[field.key] = document.getElementById(`fld-${field.key}`).value;
+        }
+        message('Saving…', 'info');
+        try {
+            await post(`/api/student/units/${unitId}/profile`, body);
+
+            // Photo second: the text is the substance, and a failed upload should
+            // not make it look like nothing saved.
+            if (pendingAvatar !== null) {
+                if (pendingAvatar === '') {
+                    await del('/api/student/avatar');
+                    profile.avatarPath = '';
+                } else {
+                    const r = await post('/api/student/avatar', { dataUrl: pendingAvatar });
+                    profile.avatarPath = r.avatarPath;
+                }
+            }
+
+            profile.about = profile.about.map(f => ({ ...f, value: String(body[f.key] ?? '').trim() }));
+            pendingAvatar = null;
+            editing = false;
+            render();
+            message('Profile saved.', 'ok');
+        } catch (e) {
+            message(e.message, 'error');
+        }
+    }
+
+    (async () => {
+        const params = new URLSearchParams(location.search);
+        const requested = params.get('studentId');
+        // Whitelisted so a junk value cannot break the sidebar. Links without an
+        // origin fall back on the studentId: no id at all means it is your own
+        // profile, reached from Your Profile.
+        const from = params.get('from');
+        origin = ORIGINS[from] ? from : (requested ? 'find-teammates' : 'profile');
+
+        const nav = await initStudentNav({ activeItem: origin, pageTitle: 'Full Profile' });
+        if (!nav) return;
+        unitId = nav.unitId;
+        // No studentId means "my own profile".
+        viewedId = requested || nav.user.username;
+
+        profile = await get(`/api/student/units/${unitId}/students/${encodeURIComponent(viewedId)}/profile`);
+        document.getElementById('page-title').textContent =
+            profile.isSelf ? 'My Full Profile' : `${profile.name}'s Profile`;
+        document.title = `${profile.isSelf ? 'My Full Profile' : profile.name} - TeamUp`;
+        render();
+    })().catch(err => {
+        document.getElementById('fp-card').innerHTML =
+            `<p style="color:#e94560;font-weight:600">Could not load this profile: ${esc(err.message)}</p>`;
+    });
+</script>
+</body>
+</html>

@@ -17,6 +17,8 @@
         .s-val-row { display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;font-weight:600;color:#fff }
         .s-val-dot { width:11px;height:11px;border-radius:50%;flex-shrink:0 }
         .s-fix-text { font-size:13px;color:#555;font-weight:600;margin-bottom:6px }
+        .s-member-link { color:#1a2a4a;text-decoration:none;border-bottom:1px dotted #9bb8d4 }
+        .s-member-link:hover { color:#2663ff;border-bottom-color:#2663ff }
         .s-member-slots { flex:1.6;min-width:0;color:#555;font-size:12px }
         .s-member-slots.unset { color:#e94560;font-weight:600 }
         .s-tut-fix { background:#fff8e6;border:1.5px solid #f0d9a0;border-radius:12px;padding:14px 18px;margin-bottom:16px }
@@ -191,7 +193,11 @@
               return `
             <div class="s-member-row">
               <span style="min-width:20px;color:#888">${i+1}.</span>
-              <span style="flex:1;font-weight:600">${m.name || m.student_id}</span>
+              <!-- Teammates' write-ups are worth reading once you're committed to
+                   each other, so the name links straight to the full profile. -->
+              <span style="flex:1;font-weight:600"><a class="s-member-link"
+                 href="/student/full-profile.html?unitId=${unitId}&studentId=${encodeURIComponent(m.student_id)}&from=my-team"
+                 >${esc(m.name || m.student_id)}</a></span>
               <span style="flex:1;color:#555">${m.role || '—'}</span>
               <span class="s-member-slots${slots.length ? '' : ' unset'}">${
                   slots.length ? esc(slots.join(', ')) : 'Availability not set'}</span>

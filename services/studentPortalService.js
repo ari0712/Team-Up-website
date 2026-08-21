@@ -2,6 +2,8 @@ const crypto = require('crypto');
 const ServiceError = require('./ServiceError');
 const { validateTeam } = require('../utils/teamValidator');
 const { isLocked } = require('../utils/deadline');
+const { ABOUT_FIELDS, ABOUT_MAX_LENGTH } = require('../utils/aboutFields');
+const avatarStore = require('../utils/avatarStore');
 
 // Orchestrates the student portal: enrollment, preferences, team membership and
 // the proposal-backed team-forming flow. All business rules live here so the
@@ -88,6 +90,86 @@ class StudentPortalService {
 
   getPrefs(unitId, studentId) {
     return this.prefs.get(unitId, studentId) || null;
+  }
+
+  // ── Full student profile (own or a classmate's) ─────────────────────────────
+
+  // Everything the full-profile page needs for one student, in one call.
+  //
+  // The About Me answers come back as an ordered [{ key, label, value }] list
+  // rather than loose columns, so the page renders whatever it is given and the
+  // prompts stay defined in exactly one place (utils/aboutFields.js).
+  //
+  // Deliberately per-student: listClassmates is a whole-class fanout feeding the
+  // Find Teammates list, and seven text blobs each do not belong in it.
+  getStudentProfile(unitId, viewerId, studentId) {
+    if (!this.enrollment.isEnrolled(unitId, viewerId))
+      throw new ServiceError('NOT_JOINED', 403);
+    if (!this.enrollment.isEnrolled(unitId, studentId))
+      throw new ServiceError('That student is not in this unit', 404);
+
+    const prefs = this.prefs.get(unitId, studentId) || {};
+    const account = this.studentRepo.findByUsername(studentId);
+
+    return {
+      studentId,
+      isSelf: studentId === viewerId,
+      name: this.enrollment.getName(unitId, studentId) || studentId,
+      // users.student_id is the n-number; the username stands in when blank,
+      // matching how every other page resolves it.
+      studentNumber: account?.studentId || studentId,
+      avatarPath: account?.avatarPath || '',
+      preferredRole: prefs.preferred_role || '',
+      tutorialSlots: prefs.tutorial_slots || '',
+      projectInterests: prefs.project_interests || '',
+      skills: prefs.skills || '',
+      about: ABOUT_FIELDS.map(f => ({ ...f, value: prefs[f.key] || '' })),
+    };
+  }
+
+  // Saves the About Me text. Every field is optional, so an all-blank save is
+  // valid and simply clears them.
+  //
+  // No arePrefsLocked check, by design: this text feeds neither validateTeam nor
+  // matching, so freezing it when the team is submitted would only stop students
+  // introducing themselves to teammates they have just committed to.
+  saveAbout(unitId, studentId, body) {
+    if (!this.enrollment.isEnrolled(unitId, studentId))
+      throw new ServiceError('NOT_JOINED', 403);
+
+    const about = {};
+    for (const { key, label } of ABOUT_FIELDS) {
+      const value = String(body?.[key] ?? '').trim();
+      if (value.length > ABOUT_MAX_LENGTH)
+        throw new ServiceError(
+          `"${label}" is ${value.length} characters; the limit is ${ABOUT_MAX_LENGTH}.`, 400);
+      about[key] = value;
+    }
+
+    this.prefs.upsertAbout(unitId, studentId, about);
+    return { ok: true };
+  }
+
+  // The picture belongs to the person, not to any one unit, so this is not
+  // unit-scoped. Writes the new file first, then repoints the row, then deletes
+  // the old file — that order means a failure anywhere leaves the student with a
+  // picture that still exists, never a row pointing at a deleted file.
+  saveAvatar(studentId, dataUrl) {
+    let avatarPath;
+    try { avatarPath = avatarStore.save(dataUrl); }
+    catch (e) { throw new ServiceError(e.message, 400); }
+
+    const previous = this.studentRepo.getAvatarPath(studentId);
+    this.studentRepo.setAvatarPath(studentId, avatarPath);
+    if (previous && previous !== avatarPath) avatarStore.remove(previous);
+    return { ok: true, avatarPath };
+  }
+
+  clearAvatar(studentId) {
+    const previous = this.studentRepo.getAvatarPath(studentId);
+    this.studentRepo.setAvatarPath(studentId, '');
+    avatarStore.remove(previous);
+    return { ok: true, avatarPath: '' };
   }
 
   // A student's preferences freeze the moment their team leaves FORMING — i.e.
