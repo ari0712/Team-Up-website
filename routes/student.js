@@ -57,6 +57,23 @@ module.exports = function createStudentRouter({ studentPortalService }) {
       res.json({ ok: true });
     }));
 
+  // ── Full profile (About Me + picture) ───────────────────────────
+  // Fetched one student at a time rather than added to the class-list payload,
+  // which is a whole-class fanout. Works for your own profile and a classmate's.
+  router.get('/units/:unitId/students/:studentId/profile', (req, res) =>
+    send(res, () => res.json(
+      svc.getStudentProfile(req.params.unitId, sid(req), req.params.studentId))));
+
+  router.post('/units/:unitId/profile', (req, res) =>
+    send(res, () => res.json(svc.saveAbout(req.params.unitId, sid(req), req.body || {}))));
+
+  // Not unit-scoped: the picture is a property of the person, not the enrolment.
+  router.post('/avatar', (req, res) =>
+    send(res, () => res.json(svc.saveAvatar(sid(req), (req.body || {}).dataUrl))));
+
+  router.delete('/avatar', (req, res) =>
+    send(res, () => res.json(svc.clearAvatar(sid(req)))));
+
   // ── Classmates & teams ──────────────────────────────────────────
   router.get('/units/:unitId/students', (req, res) =>
     send(res, () => res.json(svc.searchClassmates(req.params.unitId, sid(req), req.query))));

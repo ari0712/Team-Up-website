@@ -107,10 +107,12 @@
             color: #1a2a4a;
             font-weight: 800;
         }
+        /* Three tracks since "Read Full Profile" joined Propose Merge and Close;
+           wraps rather than overflowing on a narrow window. */
         .classmate-actions {
             display: grid;
-            grid-template-columns: minmax(220px, 290px) minmax(220px, 290px);
-            gap: 32px;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 260px));
+            gap: 20px 32px;
             margin-top: 48px;
         }
         .classmate-actions .t-open-btn {
@@ -277,6 +279,8 @@
                 ${renderCompatibility(result)}
             </div>
             <div class="classmate-actions">
+                <button class="t-open-btn" style="background:#fff;color:#2663ff;border:1.5px solid #2663ff"
+                    onclick="window.location='/student/full-profile.html?unitId=${unitId}&studentId=${encodeURIComponent(classmate.student_id)}&from=find-teammates'">Read Full Profile</button>
                 ${classmate.team_id
                     ? `<button class="t-open-btn" onclick="proposeMerge('${classmate.team_id}')">Propose Merge</button>`
                     : `<button class="t-open-btn" style="background:#aaa;cursor:not-allowed" disabled>No team yet</button>`

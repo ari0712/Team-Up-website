@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { ABOUT_COLUMNS } = require('../utils/aboutFields');
 
 // Owns all schema creation and one-shot data migrations. Operates directly on
 // the raw sql.js handle so the DDL and the legacy migrations behave exactly as
@@ -35,6 +36,12 @@ class SchemaMigrator {
       FOREIGN KEY (username) REFERENCES users(username),
       FOREIGN KEY (team_id)  REFERENCES teams(team_id)
     )`);
+
+    // Profile picture, added when student profiles shipped. Holds a PATH under
+    // public/uploads/avatars, never the image itself: Database.save() rewrites
+    // the whole file on every write, so image bytes in here would slow down
+    // every unrelated write in the app. '' means "no picture set".
+    try { db.run(`ALTER TABLE students ADD COLUMN avatar_path TEXT DEFAULT ''`); } catch (e) {}
 
     db.run(`CREATE TABLE IF NOT EXISTS team_invites (
       invite_id          TEXT PRIMARY KEY,
@@ -145,6 +152,14 @@ class SchemaMigrator {
       PRIMARY KEY (unit_id, student_id),
       FOREIGN KEY (unit_id) REFERENCES units(unit_id)
     )`);
+
+    // Free-text "About Me" answers, added when student profiles shipped. Kept
+    // per-unit alongside the other preferences because four of the seven prompts
+    // ask about THIS capstone. All optional — '' means "not filled in yet", and
+    // an empty answer is a normal state rather than an unfinished one.
+    for (const col of ABOUT_COLUMNS) {
+      try { db.run(`ALTER TABLE student_unit_prefs ADD COLUMN ${col} TEXT DEFAULT ''`); } catch (e) {}
+    }
 
     // ── STUDENT PORTAL: unit-scoped teams ─────────────────────────
     db.run(`CREATE TABLE IF NOT EXISTS unit_teams (

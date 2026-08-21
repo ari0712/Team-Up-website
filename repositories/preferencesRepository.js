@@ -1,4 +1,5 @@
 const BaseRepository = require('./BaseRepository');
+const { ABOUT_COLUMNS } = require('../utils/aboutFields');
 
 // Data access for `student_unit_prefs` (per-unit student preferences).
 class PreferencesRepository extends BaseRepository {
@@ -31,6 +32,30 @@ class PreferencesRepository extends BaseRepository {
          saved_at=excluded.saved_at`,
       [unitId, studentId, p.tutorialSlots, p.projectInterests, p.skills,
        p.preferredRole, p.preferredTeammates, p.savedAt]
+    );
+  }
+
+  // Writes ONLY the About Me columns, leaving the structured preferences alone.
+  //
+  // Deliberately not folded into `upsert` above: that one overwrites every
+  // column from its argument, so routing the profile save through it would
+  // blank the student's tutorial slots, interests, skills and role.
+  //
+  // The INSERT branch matters — a student can write their profile before ever
+  // saving preferences, and there is no row yet in that case. The remaining
+  // columns take their table defaults, and `saved_at` is left alone because it
+  // records when the *preferences* were last saved.
+  upsertAbout(unitId, studentId, about) {
+    const cols = ABOUT_COLUMNS.join(', ');
+    const placeholders = ABOUT_COLUMNS.map(() => '?').join(',');
+    const updates = ABOUT_COLUMNS.map(c => `${c}=excluded.${c}`).join(', ');
+    const values = ABOUT_COLUMNS.map(c => about[c] ?? '');
+
+    this.run(
+      `INSERT INTO student_unit_prefs (unit_id, student_id, ${cols})
+       VALUES (?,?,${placeholders})
+       ON CONFLICT(unit_id, student_id) DO UPDATE SET ${updates}`,
+      [unitId, studentId, ...values]
     );
   }
 

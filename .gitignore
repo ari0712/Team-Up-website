@@ -16,6 +16,11 @@ node_modules/
 *.sqlite
 *.sqlite3
 
+# ── User-uploaded files ─────────────────────────────────────────────────────
+# Student profile pictures, written by utils/avatarStore.js. Real people's
+# photos, and re-created on demand — never commit them.
+public/uploads/
+
 # ── IDE / editor state (machine-specific) ───────────────────────────────────
 .idea/
 .vs/

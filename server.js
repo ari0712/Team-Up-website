@@ -43,7 +43,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DB_PATH = path.join(__dirname, 'teamup.db');
 
-app.use(express.json());
+// 1mb, not the 100kb default: profile pictures arrive as base64 data URLs in the
+// JSON body. The page downscales them to ~20kb first, so this is headroom rather
+// than an expected size — utils/avatarStore enforces the real limit.
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 

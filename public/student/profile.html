@@ -36,6 +36,15 @@
             margin-bottom: 6px;
             font-weight: 800;
         }
+        .profile-identity { display: flex; align-items: center; gap: 14px; margin-bottom: 6px }
+        .profile-avatar, .profile-initials {
+            width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0;
+            object-fit: cover; border: 2px solid #d0dff0; background: #eef4ff;
+        }
+        .profile-initials {
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px; font-weight: 800; color: #2663ff;
+        }
         /* Sits inside the name heading, so it is toned down to keep the name dominant.
            Mirrors .classmate-id on the classmate profile page. */
         .profile-id {
@@ -114,10 +123,19 @@
     <main class="profile-shell">
         <section class="profile-card">
             <div class="profile-inner">
-                <h2 id="profile-heading">Student Profile</h2>
-                <p class="profile-role">Preferred Role: <span id="profile-role">Loading...</span></p>
+                <div class="profile-identity">
+                    <div id="profile-avatar"></div>
+                    <div style="min-width:0">
+                        <h2 id="profile-heading">Student Profile</h2>
+                        <p class="profile-role">Preferred Role: <span id="profile-role">Loading...</span></p>
+                    </div>
+                </div>
 
                 <div id="profile-content"></div>
+
+                <button class="t-open-btn" id="full-profile-btn" style="width:100%;margin-top:8px">
+                    View / Edit Full Profile
+                </button>
             </div>
         </section>
     </main>
@@ -132,7 +150,7 @@
         .map(v => v.trim())
         .filter(Boolean);
 
-    const escapeHtml = value => String(value)
+    const escapeHtml = value => String(value ?? '')
         .replaceAll('&', '&amp;')
         .replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;')
@@ -167,6 +185,20 @@
         `;
     }
 
+    function initials(name) {
+        const parts = String(name || '?').trim().split(/\s+/).filter(Boolean);
+        return ((parts[0]?.[0] || '?') + (parts.length > 1 ? parts[parts.length - 1][0] : ''))
+            .toUpperCase();
+    }
+
+    // A missing avatar file does NOT 404 — the server's catch-all returns
+    // index.html with a 200 — so the fallback has to hang off onerror.
+    function avatarHtml(src, name) {
+        if (!src) return `<div class="profile-initials">${escapeHtml(initials(name))}</div>`;
+        return `<img class="profile-avatar" src="${escapeHtml(src)}" alt=""
+                     onerror="this.outerHTML='&lt;div class=&quot;profile-initials&quot;&gt;${escapeHtml(initials(name))}&lt;/div&gt;'">`;
+    }
+
     function renderEmptyState() {
         return `
             <div class="profile-empty">
@@ -187,6 +219,12 @@
         document.title = `${title} - TeamUp`;
         document.getElementById('page-title').textContent = title;
         document.getElementById('profile-heading').innerHTML = formatStudentHeading(nav.user);
+        // avatarPath rides along on /api/auth/me, so the picture costs no extra fetch.
+        document.getElementById('profile-avatar').innerHTML =
+            avatarHtml(nav.user.avatarPath, studentName);
+        document.getElementById('full-profile-btn').onclick = () => {
+            window.location = `/student/full-profile.html?unitId=${unitId}&from=profile`;
+        };
 
         const unit = await requireUnitAccess(unitId);
         if (!unit) return;
