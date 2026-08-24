@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "npx nodemon server.js"
+    "dev": "npx nodemon server.js",
+    "preview-email": "node scripts/preview-email.js"
   },
   "dependencies": {
     "express": "^4.18.3",
