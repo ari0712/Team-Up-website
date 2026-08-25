@@ -6,6 +6,14 @@ function sanitize(user) {
   return safe;
 }
 
+function passwordError(password) {
+  if (password.length < 8) return 'Password must be at least 8 characters long';
+  if (!/[A-Z]/.test(password)) return 'Password must contain at least 1 uppercase letter';
+  if (!/[0-9]/.test(password)) return 'Password must contain at least 1 number';
+  if (!/[^A-Za-z0-9]/.test(password)) return 'Password must contain at least 1 special character';
+  return null;
+}
+
 // Factory: receives its collaborators from the composition root (server.js).
 module.exports = function createAuthRouter({ userRepo, authService, studentService }) {
   const router = express.Router();
@@ -35,6 +43,9 @@ module.exports = function createAuthRouter({ userRepo, authService, studentServi
       return res.status(400).json({ error: 'All fields are required' });
     if (password !== confirmPassword)
       return res.status(400).json({ error: 'Passwords do not match' });
+    const pwError = passwordError(password);
+    if (pwError)
+      return res.status(400).json({ error: pwError });
     if (authService.usernameExists(username))
       return res.status(409).json({ error: 'Username already taken' });
     const user = authService.signUp(username, password, email, role);

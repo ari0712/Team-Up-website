@@ -189,6 +189,7 @@
     <div class="auth-field">
       <label>Password</label>
       <input id="password" type="password" placeholder="Choose a password" autocomplete="new-password">
+      <span class="auth-hint">Min 8 characters, 1 uppercase, 1 number, 1 special character.</span>
     </div>
     <div class="auth-field">
       <label>Confirm Password</label>
@@ -241,6 +242,18 @@
     }
     if (password !== confirmPassword) {
       errEl.textContent = 'Passwords do not match.'; return;
+    }
+    if (password.length < 8) {
+      errEl.textContent = 'Password must be at least 8 characters long.'; return;
+    }
+    if (!/[A-Z]/.test(password)) {
+      errEl.textContent = 'Password must contain at least 1 uppercase letter.'; return;
+    }
+    if (!/[0-9]/.test(password)) {
+      errEl.textContent = 'Password must contain at least 1 number.'; return;
+    }
+    if (!/[^A-Za-z0-9]/.test(password)) {
+      errEl.textContent = 'Password must contain at least 1 special character.'; return;
     }
 
     try {
