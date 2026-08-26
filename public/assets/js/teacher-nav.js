@@ -10,6 +10,7 @@ const TEACHER_NAV_ITEMS = [
     { key: 'team-formation',  label: 'Team Formation', href: '/teacher/team-formation.html' },
     { key: 'class-list',      label: 'Class List',     href: '/teacher/class-list.html' },
     { key: 'announcements',   label: 'Announcements',  href: '/teacher/announcements.html' },
+    { key: 'forum',           label: 'Forum',          href: '/teacher/forum.html' },
     { key: 'export',          label: 'Export',         href: '/teacher/export.html' },
 ];
 

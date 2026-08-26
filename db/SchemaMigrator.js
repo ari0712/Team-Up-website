@@ -273,6 +273,51 @@ class SchemaMigrator {
       FOREIGN KEY (unit_id) REFERENCES units(unit_id)
     )`);
 
+    // ── Forum: the unit's shared discussion board ──────────────────
+    // The first feature students write into and other people read. Both roles
+    // post here, so `author_username` is a users.username — the same convention
+    // notifications.student_id uses — with author_role as the discriminator.
+    //
+    // The author's display name and picture are deliberately NOT stored: they
+    // are joined from `students` at read time, so editing your profile does not
+    // leave a stale name on every post you ever made. A teacher has no students
+    // row at all, which is why those joins must be LEFT joins.
+    db.run(`CREATE TABLE IF NOT EXISTS forum_threads (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      unit_id         TEXT    NOT NULL,
+      author_username TEXT    NOT NULL,
+      author_role     TEXT    NOT NULL DEFAULT 'STUDENT',
+      title           TEXT    NOT NULL DEFAULT '',
+      body            TEXT    NOT NULL DEFAULT '',
+      pinned          INTEGER NOT NULL DEFAULT 0,
+      created_at      TEXT    NOT NULL DEFAULT '',
+      FOREIGN KEY (unit_id) REFERENCES units(unit_id)
+    )`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_forum_threads_unit
+              ON forum_threads(unit_id, pinned, id)`);
+
+    // unit_id is repeated here rather than reached through thread_id: it makes
+    // both the per-unit scope check and the unit-delete cascade single-table
+    // operations, with no join to get wrong.
+    //
+    // There is no reply_count or last_activity_at on forum_threads for the same
+    // reason — the list query derives both with a subquery, which cannot drift
+    // the way two denormalised counters maintained across three mutation paths
+    // eventually would.
+    db.run(`CREATE TABLE IF NOT EXISTS forum_replies (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id       INTEGER NOT NULL,
+      unit_id         TEXT    NOT NULL,
+      author_username TEXT    NOT NULL,
+      author_role     TEXT    NOT NULL DEFAULT 'STUDENT',
+      body            TEXT    NOT NULL DEFAULT '',
+      created_at      TEXT    NOT NULL DEFAULT '',
+      FOREIGN KEY (thread_id) REFERENCES forum_threads(id),
+      FOREIGN KEY (unit_id)   REFERENCES units(unit_id)
+    )`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_forum_replies_thread
+              ON forum_replies(thread_id, id)`);
+
     // ── Notifications ──────────────────────────────────────────────
     // Rows are produced by NotificationService.syncForUnit (students) and
     // syncTeacherForUnit (teachers), which derive them from current state and

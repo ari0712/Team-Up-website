@@ -112,8 +112,9 @@ class UnitRepository extends BaseRepository {
          (SELECT COUNT(*) FROM unit_roster          WHERE unit_id = ?) AS rostered,
          (SELECT COUNT(*) FROM unit_teams           WHERE unit_id = ?) AS teams,
          (SELECT COUNT(*) FROM unit_tutorial_slots  WHERE unit_id = ?) AS slots,
-         (SELECT COUNT(*) FROM unit_announcements   WHERE unit_id = ?) AS announcements`,
-      Array(5).fill(unitId)
+         (SELECT COUNT(*) FROM unit_announcements   WHERE unit_id = ?) AS announcements,
+         (SELECT COUNT(*) FROM forum_threads        WHERE unit_id = ?) AS forumThreads`,
+      Array(6).fill(unitId)
     );
   }
 
@@ -143,6 +144,9 @@ class UnitRepository extends BaseRepository {
       byUnit('unit_roster');
       byUnit('unit_tutorial_slots');
       byUnit('unit_announcements');
+
+      byUnit('forum_replies');
+      byUnit('forum_threads');
 
       // The outbox is a delivery audit log — what was actually sent stays true
       // even once the unit is gone, so the rows are kept and only their pointer

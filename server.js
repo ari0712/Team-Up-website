@@ -18,6 +18,7 @@ const PreferencesRepository  = require('./repositories/preferencesRepository');
 const TeamRepository         = require('./repositories/teamRepository');
 const TutorialSlotRepository = require('./repositories/tutorialSlotRepository');
 const AnnouncementRepository = require('./repositories/announcementRepository');
+const ForumRepository        = require('./repositories/forumRepository');
 const NotificationRepository = require('./repositories/notificationRepository');
 const NotificationPrefsRepository = require('./repositories/notificationPrefsRepository');
 const EmailOutboxRepository  = require('./repositories/emailOutboxRepository');
@@ -29,6 +30,7 @@ const ProposalService      = require('./services/proposalService');
 const StudentPortalService = require('./services/studentPortalService');
 const UnitService          = require('./services/unitService');
 const NotificationService  = require('./services/notificationService');
+const ForumService         = require('./services/forumService');
 const MatchingService      = require('./services/matchingService');
 const { createTransport }  = require('./services/email/transport');
 const { isLocked }         = require('./utils/deadline');
@@ -38,6 +40,7 @@ const createAuthRouter    = require('./routes/auth');
 const createUnitsRouter   = require('./routes/units');
 const createStudentRouter = require('./routes/student');
 const createTeacherNotificationsRouter = require('./routes/teacherNotifications');
+const createForumRouter   = require('./routes/forum');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -71,6 +74,7 @@ db.connect().then(() => {
   const teams       = new TeamRepository(db);
   const slots       = new TutorialSlotRepository(db);
   const announcements = new AnnouncementRepository(db);
+  const forum         = new ForumRepository(db);
   const notifications = new NotificationRepository(db);
   const notifPrefs    = new NotificationPrefsRepository(db);
   const outbox        = new EmailOutboxRepository(db);
@@ -78,6 +82,8 @@ db.connect().then(() => {
   const authService     = new AuthService({ userRepo, studentRepo });
   const studentService  = new StudentService({ studentRepo });
   const proposalService = new ProposalService({ db });
+  // The one service both portals call: access is decided per-caller inside it.
+  const forumService    = new ForumService({ forum, units: unitRepo, enrollment });
   const mailTransport = createTransport();
   const notificationService = new NotificationService({
     db, notifications, prefs: notifPrefs, outbox, units: unitRepo, enrollment, teams,
@@ -108,6 +114,8 @@ db.connect().then(() => {
   app.use('/api/units',   createUnitsRouter({ unitService, matchingService }));
   app.use('/api/student', createStudentRouter({ studentPortalService }));
   app.use('/api/teacher', createTeacherNotificationsRouter({ notificationService, unitRepo }));
+  // Not under /api/student or /api/units: students and teachers share this one.
+  app.use('/api/forum',   createForumRouter({ forumService }));
 
   // An unmatched /api route must NOT fall through to the SPA catch-all below.
   // Serving index.html with a 200 makes a missing endpoint look like a

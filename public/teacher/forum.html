@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeamUp – Forum</title>
+    <link rel="stylesheet" href="/assets/css/style1.css">
+    <link rel="stylesheet" href="/assets/css/teacher-style.css">
+    <link rel="stylesheet" href="/assets/css/forum.css">
+    <style>
+        body.t-page { min-height: 100vh; height: auto; overflow: visible; }
+        .t-dashboard-layout { min-height: auto; }
+        .t-dash-content { overflow: visible; }
+    </style>
+</head>
+<body class="t-page">
+<header class="t-header">
+    <button class="t-logout-btn" onclick="teacherLogout()">Log Out</button>
+    <div class="t-header-title">
+        <h1 id="page-title">Forum</h1>
+        <p>Welcome, <span id="teacherName"></span>!</p>
+    </div>
+    <a class="logo" href="#"><img class="logo-icon" src="/assets/img/teamup-icon.png" alt="TeamUp">
+        <span class="logo-text"><span class="team">Team</span><span class="up">Up</span></span></a>
+</header>
+
+<div class="t-divider"></div>
+
+<div class="t-dashboard-layout">
+    <nav class="t-sidebar-nav" id="teacher-sidebar"></nav>
+    <main class="t-dash-content">
+        <div class="fo-wrap">
+            <h2 class="fo-heading">Unit Forum</h2>
+            <p class="fo-intro">
+                The unit's public board. You post and reply like anyone else — your posts carry a
+                TEACHER badge — and you can pin a thread to the top or remove anything on it.
+            </p>
+            <div id="forum-root"><p style="color:#888">Loading…</p></div>
+        </div>
+    </main>
+</div>
+
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/teacher-nav.js"></script>
+<script src="/assets/js/forum-ui.js"></script>
+<script>
+    (async () => {
+        const nav = await initTeacherNav({ activeItem: 'forum', pageTitle: 'Forum' });
+        if (!nav) return;
+
+        const root = document.getElementById('forum-root');
+        if (!nav.unitId) {
+            root.innerHTML = `<div class="fo-empty">Open a unit from the Home page to see its forum.</div>`;
+            return;
+        }
+        await mountForum({ unitId: nav.unitId, container: root });
+    })();
+</script>
+</body>
+</html>
