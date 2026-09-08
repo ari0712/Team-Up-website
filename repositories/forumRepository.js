@@ -20,7 +20,7 @@ class ForumRepository extends BaseRepository {
   listThreads(unitId) {
     return this.all(
       `SELECT p.id, p.unit_id, p.author_username, p.author_role, p.title, p.body,
-              p.pinned, p.created_at,
+              p.pinned, p.kind, p.created_at,
               ${AUTHOR},
               (SELECT COUNT(*)        FROM forum_replies r WHERE r.thread_id = p.id) AS reply_count,
               (SELECT MAX(created_at) FROM forum_replies r WHERE r.thread_id = p.id) AS last_reply_at
@@ -38,7 +38,7 @@ class ForumRepository extends BaseRepository {
   findThread(unitId, threadId) {
     return this.get(
       `SELECT p.id, p.unit_id, p.author_username, p.author_role, p.title, p.body,
-              p.pinned, p.created_at,
+              p.pinned, p.kind, p.created_at,
               ${AUTHOR}
          FROM forum_threads p
          LEFT JOIN students s ON s.username = p.author_username
@@ -80,12 +80,12 @@ class ForumRepository extends BaseRepository {
   }
 
   // Returns the new thread's id so the caller can send the author straight to it.
-  createThread({ unitId, authorUsername, authorRole, title, body, createdAt }) {
+  createThread({ unitId, authorUsername, authorRole, title, body, kind, createdAt }) {
     return this._insertReturningId(
       `INSERT INTO forum_threads
-         (unit_id, author_username, author_role, title, body, created_at)
-       VALUES (?,?,?,?,?,?)`,
-      [unitId, authorUsername, authorRole, title, body, createdAt]
+         (unit_id, author_username, author_role, title, body, kind, created_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      [unitId, authorUsername, authorRole, title, body, kind, createdAt]
     );
   }
 

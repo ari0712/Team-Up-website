@@ -275,3 +275,90 @@
     color: #5a7a9a;
     margin: 18px 0 10px;
 }
+
+/* ── Recruiting: threads that carry a team you can ask to join ──── */
+
+/* Board tabs. Plain links, not buttons: the board navigates by assigning
+ * location.search, so a tab is an ordinary navigation like opening a thread. */
+.fo-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.fo-tab {
+    text-decoration: none;
+    background: var(--bg-card);
+    border: 1.5px solid #d0dff0;
+    border-radius: 999px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #5a7a9a;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.fo-tab:hover { border-color: var(--brand-blue); color: var(--brand-blue); }
+
+.fo-tab.active {
+    background: var(--brand-blue);
+    border-color: var(--brand-blue);
+    color: #fff;
+}
+
+/* Kind toggle in the compose box. */
+.fo-kind {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #5a7a9a;
+}
+
+.fo-kind label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.fo-kind input { accent-color: var(--brand-blue); }
+
+/* Sibling of .fo-pin-flag — green rather than amber, so PINNED and
+ * LOOKING FOR TEAMMATES read as two flags of the same kind. */
+.fo-recruit-flag {
+    background: #cfeadb;
+    color: #1d6b46;
+    border-radius: 999px;
+    padding: 2px 9px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+}
+
+.fo-thread-card.recruiting { border-color: #8fd0ae; }
+
+/* The derived team strip. Sits OUTSIDE the card's <a> — a button nested in an
+ * anchor swallows its own clicks — so it carries the card's bottom margin. */
+.fo-recruit {
+    background: #f4fbf7;
+    border: 1.5px solid #cfeadb;
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin: -6px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.fo-recruit-members { font-size: 13px; color: #1a2a4a; font-weight: 600; }
+.fo-recruit-members strong { font-weight: 800; }
+
+.fo-recruit-why {
+    font-size: 12px;
+    color: #8aabbf;
+    font-weight: 600;
+    margin: 0;
+}
+
+.fo-recruit-why li { list-style: none; }
+
+.fo-recruit-main { flex: 1; min-width: 220px; }
+.fo-recruit .fo-btn { padding: 8px 18px; font-size: 13px; }

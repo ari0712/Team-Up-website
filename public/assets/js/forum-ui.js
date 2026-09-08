@@ -5,9 +5,15 @@
 // because it is the same board — the API returns `canModerate`, so nothing in
 // this file needs to know which portal it is running in.
 //
-// One page renders both views: no ?threadId is the thread list, ?threadId=N is
-// that thread. Keeping them in one page keeps the sidebar's active item correct
-// in both, and keeps the board's markup and styling in one place.
+// One page renders every view: no ?threadId is the thread list, ?threadId=N is
+// that thread, and ?tab= picks which list. Keeping them in one page keeps the
+// sidebar's active item correct in all of them, and keeps the board's markup and
+// styling in one place.
+//
+// Two of the tabs are about team formation. A RECRUITING thread carries its
+// author's live team — derived by the server on every read, never stored on the
+// post — and a button that opens the ordinary merge proposal. The Open teams tab
+// is the existing Auto-Match, rendered here rather than ranked again.
 
 // ── Text safety ───────────────────────────────────────────────────
 // EVERY string from the API goes through this. The forum is the first place in
@@ -71,29 +77,82 @@ function foThreadIdFromUrl() {
     return Number.isFinite(n) ? n : null;
 }
 
+// The active tab lives in the URL for the same reason threadId does: this board
+// navigates by assigning location.search, a full reload, so a tab held in a
+// variable would be lost the moment you opened a thread and came back.
+function foTabFromUrl() {
+    const t = new URLSearchParams(location.search).get('tab');
+    return ['recruiting', 'teams'].includes(t) ? t : 'all';
+}
+
+// One place that builds board URLs, so every link keeps the tab you are on.
+function foHref({ threadId = null, tab = foTabFromUrl() } = {}) {
+    const p = new URLSearchParams({ unitId: foUnitId });
+    if (tab && tab !== 'all') p.set('tab', tab);
+    if (threadId !== null)    p.set('threadId', threadId);
+    return '?' + p.toString();
+}
+
 async function foRender() {
     const threadId = foThreadIdFromUrl();
     foRoot.innerHTML = `<p style="color:#888">Loading…</p>`;
     try {
-        if (threadId === null) await foRenderList();
-        else                   await foRenderThread(threadId);
+        if (threadId !== null) return await foRenderThread(threadId);
+        // One fetch serves both list tabs. It also carries `role`, which decides
+        // whether the Open teams tab exists at all.
+        const data = await get(`/api/forum/units/${foUnitId}/threads`);
+        if (foTabFromUrl() === 'teams' && data.role === 'STUDENT')
+            return await foRenderOpenTeams(data);
+        foRenderList(data);
     } catch (e) {
         foRoot.innerHTML = `<div class="fo-empty">Could not load the forum: ${foEsc(e.message)}</div>`;
     }
 }
 
+// Plain links, so a tab click is an ordinary navigation like opening a thread.
+// Open teams is student-only: a teacher has no team to merge into, and
+// /teacher/team-formation.html is already their version of that view.
+function foTabBar(active, role) {
+    const tab = (key, label) =>
+        `<a class="fo-tab ${active === key ? 'active' : ''}"
+            href="${foEsc(foHref({ tab: key }))}">${label}</a>`;
+    return `<div class="fo-tabs">
+        ${tab('all', 'All discussions')}
+        ${tab('recruiting', 'Looking for teammates')}
+        ${role === 'STUDENT' ? tab('teams', 'Open teams') : ''}
+    </div>`;
+}
+
 // ── Thread list ───────────────────────────────────────────────────
 
-async function foRenderList() {
-    const data = await get(`/api/forum/units/${foUnitId}/threads`);
+function foRenderList(data) {
+    const tab = foTabFromUrl();
+    const recruitingOnly = tab === 'recruiting';
+    const threads = recruitingOnly
+        ? data.threads.filter(t => t.kind === 'RECRUITING')
+        : data.threads;
 
-    const cards = data.threads.length
-        ? data.threads.map(t => foThreadCard(t)).join('')
-        : `<div class="fo-empty">No discussions yet. Start the first one above.</div>`;
+    const cards = threads.length
+        ? threads.map(t => foThreadCard(t)).join('')
+        : `<div class="fo-empty">${recruitingOnly
+            ? 'Nobody is looking for teammates yet. Post the first one above.'
+            : 'No discussions yet. Start the first one above.'}</div>`;
+
+    // Teachers cannot post a recruiting thread (the service rejects it), so they
+    // do not get the choice. Hiding it is presentation; the server still checks.
+    const kindPicker = data.role === 'STUDENT' ? `
+        <div class="fo-kind">
+            <label><input type="radio" name="fo-kind" value="DISCUSSION"
+                          ${recruitingOnly ? '' : 'checked'}> Discussion</label>
+            <label><input type="radio" name="fo-kind" value="RECRUITING"
+                          ${recruitingOnly ? 'checked' : ''}> Looking for teammates</label>
+        </div>` : '';
 
     foRoot.innerHTML = `
+        ${foTabBar(tab, data.role)}
         <div class="fo-compose">
-            <h3>Start a discussion</h3>
+            <h3>${recruitingOnly ? 'Look for teammates' : 'Start a discussion'}</h3>
+            ${kindPicker}
             <input id="fo-title" class="fo-input" type="text" maxlength="${FO_TITLE_MAX}"
                    placeholder="What do you want to ask or share?">
             <textarea id="fo-body" class="fo-textarea" maxlength="${FO_BODY_MAX}"
@@ -104,20 +163,114 @@ async function foRenderList() {
                 <button class="fo-btn" onclick="foPostThread()">Post</button>
             </div>
         </div>
-        <div class="fo-section-label">${data.threads.length} discussion${data.threads.length === 1 ? '' : 's'}</div>
+        <div class="fo-section-label">${threads.length} ${recruitingOnly
+            ? `post${threads.length === 1 ? '' : 's'}`
+            : `discussion${threads.length === 1 ? '' : 's'}`}</div>
         ${cards}`;
 }
 
+// ── Recruiting ────────────────────────────────────────────────────
+
+// The one card renderer, shared by recruiting threads, the thread detail strip
+// and the Open teams tab. Everything it draws was derived by the server at read
+// time — nothing here is stored on a post, so it cannot go stale after a merge.
+function foRecruitCard(r) {
+    if (!r) return '';
+    if (r.gone) return `<div class="fo-recruit">
+        <span class="fo-recruit-why">This student is no longer on a team in this unit.</span>
+    </div>`;
+
+    const names = r.members.map(m => m.name || m.student_id).join(', ');
+    // Two framings of the same fact. A recruiting post is about THAT team, so it
+    // reads as spots left; an Open teams suggestion is about the merge, so it
+    // reads as the size you would end up at.
+    const size = r.merged_size
+        ? `Team of ${r.size} · ${r.merged_size} together with yours`
+        : `${r.size} of ${r.max_size}${r.spots_left
+            ? ` · ${r.spots_left} spot${r.spots_left === 1 ? '' : 's'} left` : ' · full'}`;
+
+    const action = r.can_request
+        ? `<button class="fo-btn" onclick="foProposeMerge('${foEsc(r.team_id)}')">Send request</button>`
+        : (r.why_not ? `<span class="fo-recruit-why">${foEsc(r.why_not)}</span>` : '');
+
+    return `<div class="fo-recruit">
+        <div class="fo-recruit-main">
+            <div class="fo-recruit-members"><strong>${foEsc(r.team_name)}</strong> · ${foEsc(names)}</div>
+            <div class="fo-recruit-why">${foEsc(size)}</div>
+            ${r.reasons && r.reasons.length
+                ? `<ul class="fo-recruit-why">${r.reasons.map(x => `<li>${foEsc(x)}</li>`).join('')}</ul>`
+                : ''}
+        </div>
+        ${action}
+    </div>`;
+}
+
+// Deliberately the SAME endpoint Find Teammates calls. The forum does not rank
+// teams itself: two rankers would eventually disagree about who fits whom, and a
+// student would be looking at both of them on the same afternoon.
+async function foRenderOpenTeams(data) {
+    const head = foTabBar('teams', data.role);
+    let r;
+    try {
+        r = await get(`/api/student/units/${foUnitId}/auto-match`);
+    } catch (e) {
+        foRoot.innerHTML = head + `<div class="fo-empty">${
+            e.message === 'DEADLINE_PASSED'
+                ? 'Team formation has closed for this unit.'
+                : foEsc(e.message)}</div>`;
+        return;
+    }
+
+    const list = r.suggestions || [];
+    const cards = list.map(s => foRecruitCard({
+        gone: false,
+        team_id: s.team_id,
+        team_name: s.team_name,
+        members: s.members,
+        size: s.members.length,
+        merged_size: s.mergedSize,
+        spots_left: 0,
+        reasons: s.reasons,
+        can_request: true,
+        why_not: null
+    })).join('');
+
+    foRoot.innerHTML = head + `
+        <div class="fo-section-label">
+            Ranked by shared tutorial time, then role variety, then shared interests.
+            Teams need ${foEsc(r.valid_team_sizes)} members.
+        </div>
+        ${list.length ? cards
+            : `<div class="fo-empty">${foEsc(r.why_empty || 'No suitable teams right now.')}</div>`}`;
+}
+
+// Sending a request IS a yes-vote from you; everyone on both teams still has to
+// agree. On success we refetch rather than navigate, so every card re-derives
+// itself — the one just actioned flips to "you already have a request open".
+async function foProposeMerge(teamId) {
+    try {
+        const r = await post(`/api/student/units/${foUnitId}/proposals`, { targetTeamId: teamId });
+        alert(r.state === 'approved'
+            ? 'Merge approved — your teams are now combined.'
+            : 'Request sent. It needs a yes from everyone on both teams.');
+        await foRender();
+    } catch (e) { alert(e.message); }
+}
+
 function foThreadCard(t) {
-    const href = `?unitId=${encodeURIComponent(foUnitId)}&threadId=${t.id}`;
     const excerpt = String(t.body || '');
     const short = excerpt.length > 180 ? excerpt.slice(0, 180) + '…' : excerpt;
     const activity = t.last_reply_at || t.created_at;
+    const recruiting = t.kind === 'RECRUITING';
 
+    // The recruiting strip sits OUTSIDE the anchor: its Send request button
+    // nested inside a link would have its clicks swallowed by the navigation.
     return `
-        <a class="fo-thread-card ${t.pinned ? 'pinned' : ''}" href="${foEsc(href)}">
+        <a class="fo-thread-card ${t.pinned ? 'pinned' : ''} ${recruiting ? 'recruiting' : ''}"
+           href="${foEsc(foHref({ threadId: t.id }))}">
             <div class="fo-thread-title">
-                ${t.pinned ? `<span class="fo-pin-flag">PINNED</span> ` : ''}${foEsc(t.title)}
+                ${t.pinned ? `<span class="fo-pin-flag">PINNED</span> ` : ''}
+                ${recruiting ? `<span class="fo-recruit-flag">LOOKING FOR TEAMMATES</span> ` : ''}${foEsc(t.title)}
             </div>
             ${short ? `<div class="fo-thread-excerpt">${foEsc(short)}</div>` : ''}
             <div class="fo-thread-meta">
@@ -127,7 +280,8 @@ function foThreadCard(t) {
                 <span>· ${foEsc(foDate(activity))}</span>
                 <span class="fo-replies-pill">${t.reply_count} ${t.reply_count === 1 ? 'reply' : 'replies'}</span>
             </div>
-        </a>`;
+        </a>
+        ${foRecruitCard(t.recruiting)}`;
 }
 
 async function foPostThread() {
@@ -136,13 +290,16 @@ async function foPostThread() {
     const errEl   = document.getElementById('fo-error');
     errEl.textContent = '';
 
+    const kindEl = document.querySelector('input[name="fo-kind"]:checked');
+
     try {
         const r = await post(`/api/forum/units/${foUnitId}/threads`, {
-            title: titleEl.value, body: bodyEl.value
+            title: titleEl.value, body: bodyEl.value,
+            kind: kindEl ? kindEl.value : 'DISCUSSION'
         });
         // Straight into the thread that was just created — the author almost
         // always wants to see it, and it doubles as confirmation it posted.
-        location.search = `?unitId=${encodeURIComponent(foUnitId)}&threadId=${r.id}`;
+        location.search = foHref({ threadId: r.id });
     } catch (e) {
         errEl.textContent = e.message;
     }
@@ -169,11 +326,13 @@ async function foRenderThread(threadId) {
         : `<div class="fo-empty">No replies yet. Be the first to answer.</div>`;
 
     foRoot.innerHTML = `
-        <a class="fo-back" href="?unitId=${encodeURIComponent(foUnitId)}">← Back to all discussions</a>
+        <a class="fo-back" href="${foEsc(foHref())}">${foTabFromUrl() === 'recruiting'
+            ? '← Back to looking for teammates' : '← Back to all discussions'}</a>
 
         <div class="fo-post op">
             <div class="fo-post-title">
-                ${t.pinned ? `<span class="fo-pin-flag">PINNED</span> ` : ''}${foEsc(t.title)}
+                ${t.pinned ? `<span class="fo-pin-flag">PINNED</span> ` : ''}
+                ${t.kind === 'RECRUITING' ? `<span class="fo-recruit-flag">LOOKING FOR TEAMMATES</span> ` : ''}${foEsc(t.title)}
             </div>
             <div class="fo-post-head">
                 ${foAvatar(t.author_avatar, t.author_name)}
@@ -184,6 +343,7 @@ async function foRenderThread(threadId) {
             </div>
             <div class="fo-post-body">${foEsc(t.body)}</div>
         </div>
+        ${foRecruitCard(t.recruiting)}
 
         <div class="fo-section-label">
             ${data.replies.length} ${data.replies.length === 1 ? 'reply' : 'replies'}
@@ -247,7 +407,7 @@ async function foDeleteThread(threadId) {
     try {
         await del(`/api/forum/units/${foUnitId}/threads/${threadId}`);
         // The thread being viewed is gone, so go back to the board.
-        location.search = `?unitId=${encodeURIComponent(foUnitId)}`;
+        location.search = foHref();
     } catch (e) { alert(e.message); }
 }
 

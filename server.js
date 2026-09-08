@@ -83,7 +83,12 @@ db.connect().then(() => {
   const studentService  = new StudentService({ studentRepo });
   const proposalService = new ProposalService({ db });
   // The one service both portals call: access is decided per-caller inside it.
-  const forumService    = new ForumService({ forum, units: unitRepo, enrollment });
+  // `teams` and `proposals` are what let a recruiting thread show its author's
+  // live team and a working "ask to join" button, without the forum owning a
+  // second copy of the merge rules.
+  const forumService    = new ForumService({
+    forum, units: unitRepo, enrollment, teams, proposals: proposalService
+  });
   const mailTransport = createTransport();
   const notificationService = new NotificationService({
     db, notifications, prefs: notifPrefs, outbox, units: unitRepo, enrollment, teams,

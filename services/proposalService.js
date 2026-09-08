@@ -83,21 +83,36 @@ class ProposalService {
     return Math.max(...sizes);
   }
 
-  // ── createProposal ─────────────────────────────────────────────────────────
-  createProposal({ unitId, sourceTeamId, targetTeamId, initiatorId }) {
+  // ── checkProposal ──────────────────────────────────────────────────────────
+  // The preconditions for a merge, as data instead of as a throw.
+  //
+  // createProposal calls this first and is the only thing that writes, so a UI
+  // asking "could I ask to join that team?" — the forum's recruiting cards — is
+  // answered by these exact rules rather than by a second copy of them that
+  // drifts the first time one of them changes.
+  //
+  // Read-only and cheap (four indexed lookups): safe to call once per card while
+  // rendering a board.
+  //
+  // Returns { ok: true, sourceMembers, targetMembers, max }
+  //      or { ok: false, code, reason, status } — `code` is for branching,
+  //         `reason` is the message createProposal throws verbatim.
+  checkProposal({ unitId, sourceTeamId, targetTeamId, initiatorId }) {
+    const no = (code, reason, status, extra) => ({ ok: false, code, reason, status, ...extra });
+
     if (!targetTeamId)
-      throw new ServiceError('targetTeamId is required', 400);
+      return no('NO_TARGET', 'targetTeamId is required', 400);
     if (sourceTeamId === targetTeamId)
-      throw new ServiceError('Source and target must be different teams', 400);
+      return no('SELF', 'Source and target must be different teams', 400);
 
     const source = this.db.get(`SELECT * FROM unit_teams WHERE team_id = ? AND unit_id = ?`,
       [sourceTeamId, unitId]);
     const target = this.db.get(`SELECT * FROM unit_teams WHERE team_id = ? AND unit_id = ?`,
       [targetTeamId, unitId]);
-    if (!source) throw new ServiceError('Source team not found in this unit', 404);
-    if (!target) throw new ServiceError('Target team not found in this unit', 404);
+    if (!source) return no('NO_SOURCE',      'Source team not found in this unit', 404);
+    if (!target) return no('NO_TARGET_TEAM', 'Target team not found in this unit', 404);
     if (source.status !== 'FORMING' || target.status !== 'FORMING')
-      throw new ServiceError('Both teams must be in FORMING state', 400);
+      return no('NOT_FORMING', 'Both teams must be in FORMING state', 400);
 
     const initiatorOk = this.db.get(
       `SELECT 1 AS ok FROM unit_team_members
@@ -105,13 +120,13 @@ class ProposalService {
       [sourceTeamId, initiatorId]
     );
     if (!initiatorOk)
-      throw new ServiceError('You are not an accepted member of the source team', 403);
+      return no('NOT_MEMBER', 'You are not an accepted member of the source team', 403);
 
     const sourceMembers = this.getAcceptedMemberIds(sourceTeamId);
     const targetMembers = this.getAcceptedMemberIds(targetTeamId);
     const max = this.getMaxTeamSize(unitId);
     if (sourceMembers.length + targetMembers.length > max)
-      throw new ServiceError(`Combined team size would exceed the max of ${max}`, 400);
+      return no('TOO_BIG', `Combined team size would exceed the max of ${max}`, 400, { max });
 
     const duplicate = this.db.get(
       `SELECT 1 AS ok FROM proposals
@@ -121,7 +136,16 @@ class ProposalService {
       [sourceTeamId, targetTeamId, targetTeamId, sourceTeamId]
     );
     if (duplicate)
-      throw new ServiceError('An open proposal between these teams already exists', 409);
+      return no('DUPLICATE', 'An open proposal between these teams already exists', 409);
+
+    return { ok: true, sourceMembers, targetMembers, max };
+  }
+
+  // ── createProposal ─────────────────────────────────────────────────────────
+  createProposal({ unitId, sourceTeamId, targetTeamId, initiatorId }) {
+    const check = this.checkProposal({ unitId, sourceTeamId, targetTeamId, initiatorId });
+    if (!check.ok) throw new ServiceError(check.reason, check.status);
+    const { sourceMembers, targetMembers } = check;
 
     const proposalId = crypto.randomUUID();
     const now = nowIso();

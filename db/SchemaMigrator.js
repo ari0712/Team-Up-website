@@ -296,6 +296,21 @@ class SchemaMigrator {
     db.run(`CREATE INDEX IF NOT EXISTS idx_forum_threads_unit
               ON forum_threads(unit_id, pinned, id)`);
 
+    // What kind of post this is: 'DISCUSSION' | 'RECRUITING'.
+    //
+    // One column, not a second table — a recruiting post IS a thread: same board,
+    // same replies, same moderation, same pinning. Only the card around it differs.
+    //
+    // And deliberately no team_id. ProposalService.executeMerge DELETEs the losing
+    // unit_teams row on every approved merge, so a team id stored here would be a
+    // dangling pointer within a day. The author's team is derived from
+    // author_username at read time, the same way author_name is, which stays
+    // correct across every merge, leave and kick without anyone editing the post.
+    //
+    // No index: the board is already fetched whole, so the tab filter is a
+    // client-side array filter, not a query.
+    try { db.run(`ALTER TABLE forum_threads ADD COLUMN kind TEXT NOT NULL DEFAULT 'DISCUSSION'`); } catch (e) {}
+
     // unit_id is repeated here rather than reached through thread_id: it makes
     // both the per-unit scope check and the unit-delete cascade single-table
     // operations, with no join to get wrong.
