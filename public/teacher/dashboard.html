@@ -106,8 +106,8 @@
             // Build rules list from stored settings
             const sizes = (u.valid_team_sizes || '4').split(',').map(Number).sort((a,b) => a-b);
             const rules = [];
-            if (sizes.length === 1) rules.push(`Team must have ${sizes[0]} students`);
-            else rules.push(`Team must have ${sizes[0]}–${sizes[sizes.length-1]} students`);
+            if (sizes.length === 1) rules.push(`Target team size: ${sizes[0]} students (smaller groups can be recorded)`);
+            else rules.push(`Target team size: ${sizes[0]}–${sizes[sizes.length-1]} students (smaller groups can be recorded)`);
             if (u.max_one_group)       rules.push('Every student can only be in one team');
             if (u.must_share_tutorial) rules.push('All members must share at least one tutorial');
             if (u.max_new_to_qut > 0) rules.push(`Maximum ${u.max_new_to_qut} new-to-QUT students in one team`);
@@ -117,6 +117,11 @@
             rules.push(atRisk > 0
                 ? `Students needing attention are flagged ${atRisk} day${atRisk === 1 ? '' : 's'} before the deadline`
                 : 'Students needing attention are never flagged');
+
+            rules.push('Groups are recorded automatically when everyone accepts a team-up request and the rules are met');
+            rules.push(u.export_student_number == 1
+                ? 'Export includes student numbers (email is always included)'
+                : 'Export identifies students by email only');
 
             document.getElementById('rulesList').innerHTML = rules.map(r => `<li>✓ ${r}</li>`).join('');
             document.getElementById('editRulesBtn').onclick = () => openEditRules(u);
@@ -132,10 +137,12 @@
             const total = p.total || 0;
 
             const stages = [
-                { label: 'Read rules',           count: p.readRules },
-                { label: 'Enter preferences',    count: p.enteredPrefs },
-                { label: 'Build or join team',   count: p.inTeam },
-                { label: 'Submit team request',  count: p.submittedRequest }
+                { label: 'Read rules',            count: p.readRules },
+                { label: 'Enter preferences',     count: p.enteredPrefs },
+                { label: 'Grouped',               count: p.grouped },
+                { label: 'Declared no preference', count: p.declared },
+                { label: 'No activity recorded',  count: p.silent },
+                { label: 'Finalised',             count: p.finalised }
             ];
 
             document.getElementById('progressRows').innerHTML = stages.map(s => {
@@ -161,6 +168,9 @@
 
     // Stored deadline -> the value format a datetime-local input expects.
     // Shared by both dialogs so they can never disagree.
+    const escapeHtml = v => String(v ?? '').replace(/[&<>"']/g, c =>
+        ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
     function toDatetimeLocal(value) {
         if (!value) return '';
         const d = new Date(value);
@@ -175,11 +185,15 @@
         document.getElementById('er-newqut').value   = u.max_new_to_qut   || 2;
         document.getElementById('er-onegroup').checked = !!u.max_one_group;
         document.getElementById('er-tutorial').checked = !!u.must_share_tutorial;
+        document.getElementById('er-exportnum').checked = u.export_student_number == 1;
         document.getElementById('er-deadline').value = toDatetimeLocal(u.deadline);
         // ?? not ||, because 0 ("Never") is a real stored value.
         document.getElementById('er-atrisk').value = String(u.at_risk_days ?? 3);
         document.getElementById('er-save-msg').textContent = '';
         document.getElementById('editRulesModal').classList.add('open');
+        for (const id of ['er-sizes', 'er-newqut', 'er-tutorial'])
+            document.getElementById(id).oninput = document.getElementById(id).onchange = previewImpact;
+        previewImpact();
     }
 
     // ── Deadline-only dialog, reached straight from the banner ──────────
@@ -222,12 +236,39 @@
         document.getElementById('editRulesModal').classList.remove('open');
     }
 
+    // Asks the server which existing groups the values on screen would put in
+    // breach. Read-only; the save is never blocked — the coordinator decides.
+    let impactSeq = 0;
+    async function previewImpact() {
+        const box = document.getElementById('er-impact');
+        const seq = ++impactSeq;
+        const q = new URLSearchParams({
+            validTeamSizes:    document.getElementById('er-sizes').value.trim(),
+            maxNewToQut:       document.getElementById('er-newqut').value,
+            mustShareTutorial: document.getElementById('er-tutorial').checked
+        });
+        try {
+            const impact = await get(`/api/units/${unitId}/rules/impact?${q}`);
+            if (seq !== impactSeq) return;                      // a newer edit superseded this one
+            if (!impact.length) { box.style.display = 'none'; return; }
+            box.style.display = 'block';
+            box.innerHTML = `<strong>Saving will put ${impact.length} group${impact.length === 1 ? '' : 's'} in breach:</strong>` +
+                impact.map(g => `<div style="margin-top:4px">${escapeHtml(g.team_name)} (${g.members.map(m => escapeHtml(m.name || m.student_id)).join(', ')}) — ${escapeHtml(g.violations[0].rule)}: ${escapeHtml(g.violations[0].why)}</div>`).join('') +
+                `<div style="margin-top:6px">Those students will see this on My Team, and the organiser will split these groups unless they fix it. You can still save.</div>`;
+        } catch (e) {
+            if (seq !== impactSeq) return;
+            box.style.display = 'block';
+            box.textContent = `Could not check impact: ${e.message}`;
+        }
+    }
+
     async function saveRules() {
         const payload = {
             validTeamSizes:    document.getElementById('er-sizes').value.trim(),
             maxNewToQut:       parseInt(document.getElementById('er-newqut').value) || 2,
             maxOneGroup:       document.getElementById('er-onegroup').checked,
             mustShareTutorial: document.getElementById('er-tutorial').checked,
+            exportStudentNumber: document.getElementById('er-exportnum').checked,
             deadline:          document.getElementById('er-deadline').value,
             atRiskDays:        parseInt(document.getElementById('er-atrisk').value)
         };
@@ -294,7 +335,15 @@
         }
     }
     async function deleteSlot(slotId, label) {
-        if (!confirm(`Delete "${label}"? Any student selections of this slot will be removed.`)) return;
+        // Dry run first: a slot can be the only one a recorded group shares.
+        let warning = '';
+        try {
+            const dry = await api('DELETE', `/api/units/${unitId}/tutorial-slots/${slotId}?dryRun=1`);
+            if (dry.impact && dry.impact.length)
+                warning = `\n\nThis will put ${dry.impact.length} group${dry.impact.length === 1 ? '' : 's'} in breach of the shared-tutorial rule: ` +
+                          dry.impact.map(g => g.team_name).join(', ') + '.';
+        } catch { /* advisory only */ }
+        if (!confirm(`Delete "${label}"? Any student selections of this slot will be removed.${warning}`)) return;
         try {
             await del(`/api/units/${unitId}/tutorial-slots/${slotId}`);
             document.getElementById('slotMsg').style.color = '#22c55e';
@@ -347,6 +396,15 @@
             </div>
         </div>
         <div class="t-modal-field">
+            <div class="t-modal-toggle">
+                <input type="checkbox" id="er-exportnum">
+                <label for="er-exportnum">Include student numbers in the export</label>
+            </div>
+            <p style="font-size:11px;color:#888;margin:4px 0 0">Off by default. Email is always included and is the
+               join key against your class list. Whether the student number may leave the system depends on where
+               TeamUp is hosted — see the README.</p>
+        </div>
+        <div class="t-modal-field">
             <label>Deadline</label>
             <input type="datetime-local" id="er-deadline">
         </div>
@@ -364,6 +422,10 @@
                 are unaffected.
             </p>
         </div>
+        <!-- What the change on screen would do to groups that already exist.
+             Filled by previewRulesImpact on every edit, so a rule that puts
+             recorded groups in breach is never a surprise at finalise time. -->
+        <div id="er-impact" style="display:none;background:#fff8e6;border:1.5px solid #f0d9a0;border-radius:10px;padding:10px 14px;font-size:12px;color:#6b5a2e;margin-top:6px"></div>
         <p id="er-save-msg" class="t-save-msg"></p>
         <div class="t-modal-actions">
             <button class="t-modal-cancel" onclick="closeEditRules()">Cancel</button>

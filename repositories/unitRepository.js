@@ -167,10 +167,11 @@ class UnitRepository extends BaseRepository {
           must_share_tutorial = ?,
           max_new_to_qut      = ?,
           deadline            = ?,
-          at_risk_days        = ?
+          at_risk_days        = ?,
+          export_student_number = ?
        WHERE unit_id = ?`,
       [r.validTeamSizes, r.maxOneGroup, r.mustShareTutorial, r.maxNewToQut, r.deadline,
-       r.atRiskDays, unitId]
+       r.atRiskDays, r.exportStudentNumber ? 1 : 0, unitId]
     );
   }
 

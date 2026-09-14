@@ -1,17 +1,36 @@
 const crypto = require('crypto');
 const ServiceError = require('./ServiceError');
-const { validateTeam } = require('../utils/teamValidator');
+const { validateTeam, targetSizeLabel } = require('../utils/teamValidator');
+const { placementOf } = require('../utils/placement');
+const { matchesStudent, normalise } = require('../utils/studentSearch');
+
+// Classmate search rate limit: per (student, unit), sliding window.
+//
+// A real session is a handful of queries. A burst is someone walking the
+// address space: the search matches full emails, so without a limit a script
+// could confirm addresses one guess at a time.
+//
+// In-memory and per-process: it resets on restart and is NOT shared across
+// instances. That matches the single-process sql.js deployment this app is.
+// If TeamUp is ever run multi-instance it needs a shared store (see README,
+// "Open decisions").
+const SEARCH_LIMIT = 30;
+const SEARCH_WINDOW_MS = 5 * 60 * 1000;
 const { isLocked } = require('../utils/deadline');
 const { ABOUT_FIELDS, ABOUT_MAX_LENGTH } = require('../utils/aboutFields');
 const avatarStore = require('../utils/avatarStore');
 
 // Orchestrates the student portal: enrollment, preferences, team membership and
-// the proposal-backed team-forming flow. All business rules live here so the
-// route handlers stay thin. Errors are thrown as ServiceError and translated to
-// HTTP by the router.
+// the team-up request flow. All business rules live here so the route handlers
+// stay thin. Errors are thrown as ServiceError and translated to HTTP by the
+// router.
+//
+// There is no "submit" step. An accepted team-up request is the record, and
+// the unit's deadline is the only thing that freezes a student's group; the
+// coordinator's FINALISED status is an override, never a required step.
 class StudentPortalService {
   constructor({ units, enrollment, roster, progress, prefs, teams, slots, announcements, studentRepo,
-                proposalService, notificationService, matchingService }) {
+                teamRequestService, notificationService, matchingService }) {
     this.notificationService = notificationService;
     this.matchingService = matchingService;
     this.roster = roster;
@@ -23,7 +42,7 @@ class StudentPortalService {
     this.slots = slots;
     this.announcements = announcements;
     this.studentRepo = studentRepo;
-    this.proposalService = proposalService;
+    this.requests = teamRequestService;
   }
 
   // Only units the student's email appears on the roster for. A unit with no
@@ -71,24 +90,55 @@ class StudentPortalService {
     return this.announcements.listForStudent(unitId);
   }
 
+  // Every per-unit read and write goes through this. requireStudent only proves
+  // the caller is A student — not that they are in THIS unit — and an id in
+  // the URL is not a credential.
+  _assertEnrolled(unitId, studentId) {
+    if (!this.enrollment.isEnrolled(unitId, studentId))
+      throw new ServiceError('NOT_JOINED', 403);
+  }
+
+  // Two stages the student performs (stored) and two the system derives —
+  // grouped/declared from placement, finalised from the team's status — so the
+  // nav ticks can never disagree with the class list or the export.
   getProgress(unitId, studentId) {
-    return this.progress.get(unitId, studentId) || {
-      read_rules: 0, entered_preferences: 0,
-      in_team: 0, submitted_request: 0, teacher_approved: 0
+    this._assertEnrolled(unitId, studentId);
+    const stored = this.progress.get(unitId, studentId) || {};
+    const { placement, team } = this._standing(unitId, studentId);
+    return {
+      read_rules:          stored.read_rules ? 1 : 0,
+      entered_preferences: stored.entered_preferences ? 1 : 0,
+      grouped:             placement === 'GROUPED' || placement === 'DECLARED' ? 1 : 0,
+      finalised:           team?.status === 'FINALISED' ? 1 : 0,
+      placement
     };
   }
 
+  // The student's team row, accepted-member count and placement, in one place.
+  _standing(unitId, studentId) {
+    const noPreferenceAt = this.enrollment.getNoPreferenceAt(unitId, studentId);
+    const membership = this.teams.findStudentTeam(unitId, studentId);
+    const team = membership ? this.teams.findById(membership.team_id) : null;
+    const acceptedCount = team
+      ? this.teams.getMembers(team.team_id).filter(m => m.status === 'ACCEPTED').length : 0;
+    return { team, acceptedCount, noPreferenceAt,
+             placement: placementOf({ acceptedCount, noPreferenceAt }) };
+  }
+
   setProgressStage(unitId, studentId, stage, value) {
+    this._assertEnrolled(unitId, studentId);
     if (!this.progress.constructor.TOGGLEABLE_STAGES.includes(stage))
       throw new ServiceError('Invalid stage', 400);
     this.progress.setStage(unitId, studentId, stage, value);
   }
 
-  getTutorialSlots(unitId) {
+  getTutorialSlots(unitId, studentId) {
+    this._assertEnrolled(unitId, studentId);
     return this.slots.listForUnit(unitId);
   }
 
   getPrefs(unitId, studentId) {
+    this._assertEnrolled(unitId, studentId);
     return this.prefs.get(unitId, studentId) || null;
   }
 
@@ -111,13 +161,15 @@ class StudentPortalService {
     const prefs = this.prefs.get(unitId, studentId) || {};
     const account = this.studentRepo.findByUsername(studentId);
 
+    const isSelf = studentId === viewerId;
     return {
       studentId,
-      isSelf: studentId === viewerId,
+      isSelf,
       name: this.enrollment.getName(unitId, studentId) || studentId,
-      // users.student_id is the n-number; the username stands in when blank,
-      // matching how every other page resolves it.
-      studentNumber: account?.studentId || studentId,
+      // Your own address, never a classmate's: a classmate's email reaches a
+      // viewer through exactly one path — the shared-name case on the Find
+      // Teammates card. The student number is never returned here.
+      ...(isSelf ? { email: account?.email || '' } : {}),
       avatarPath: account?.avatarPath || '',
       preferredRole: prefs.preferred_role || '',
       tutorialSlots: prefs.tutorial_slots || '',
@@ -172,15 +224,13 @@ class StudentPortalService {
     return { ok: true, avatarPath: '' };
   }
 
-  // A student's preferences freeze the moment their team leaves FORMING — i.e.
-  // once it has been submitted for review, and permanently once approved. A
-  // rejected team is set back to FORMING (teamRepository.setRejected), which
-  // unlocks editing again so the student can act on the teacher's feedback.
+  // Preferences freeze only once the coordinator finalises the team. Until
+  // then they stay editable — but see savePrefs: an edit that would put a
+  // recorded group in breach of a rule is refused, not silently allowed.
   arePrefsLocked(unitId, studentId) {
     const membership = this.teams.findStudentTeam(unitId, studentId);
     if (!membership) return false;
-    const status = this.teams.findById(membership.team_id)?.status;
-    return !!status && status !== 'FORMING';
+    return this.teams.findById(membership.team_id)?.status === 'FINALISED';
   }
 
   // Everything except preferredTeammates is required. Enforced here rather than
@@ -189,11 +239,12 @@ class StudentPortalService {
   // empty save used to set that flag and make a student look ready when the
   // data the matching depends on did not exist.
   savePrefs(unitId, studentId, body) {
+    this._assertEnrolled(unitId, studentId);
     // Once the request is with the teacher, the preferences the team was built
     // and validated against must stop moving underneath it. Approval keeps them
     // locked rather than releasing them — an approved team is final.
     if (this.arePrefsLocked(unitId, studentId))
-      throw new ServiceError('PREFS_LOCKED', 403);
+      throw new ServiceError('PREFS_LOCKED', 403, 'PREFS_LOCKED');
 
     const { tutorialSlots, projectInterests, skills, preferredRole, preferredTeammates } = body;
     const csv = v => Array.isArray(v) ? v.join(',') : (v || '');
@@ -213,6 +264,24 @@ class StudentPortalService {
       throw new ServiceError(`Please choose ${list} before saving.`, 400);
     }
 
+    // A recorded group must not drift into violation because one member
+    // changed their availability. Evaluate the group with the new value in
+    // place and refuse the edit if a rule would break — the student is told
+    // which rule and why, and can leave the group first if they mean it.
+    const { team, acceptedCount } = this._standing(unitId, studentId);
+    if (team && acceptedCount >= 2) {
+      const unit = this.units.findById(unitId);
+      const members = this.teams.getMembersDetailed(unitId, team.team_id)
+        .map(m => m.student_id === studentId ? { ...m, tutorial_slots: csv(tutorialSlots) } : m);
+      const v = validateTeam(members, unit, { tutorialFallback: true, includeAllAccepted: true });
+      if (v.violations.length) {
+        const x = v.violations[0];
+        throw new ServiceError(
+          `${x.rule} — ${x.why}. Leave the group first if you need to change this.`,
+          400, 'PREFS_WOULD_BREAK_GROUP');
+      }
+    }
+
     this.prefs.upsert(unitId, studentId, {
       tutorialSlots: csv(tutorialSlots),
       projectInterests: csv(projectInterests),
@@ -224,11 +293,40 @@ class StudentPortalService {
     this.progress.markEnteredPreferences(unitId, studentId);
   }
 
+  _searchAllowed(unitId, studentId) {
+    if (!this._searchHits) this._searchHits = new Map();
+    const key = `${unitId}|${studentId}`;
+    const now = Date.now();
+    const hits = (this._searchHits.get(key) || []).filter(t => now - t < SEARCH_WINDOW_MS);
+    hits.push(now);
+    this._searchHits.set(key, hits);
+    return hits.length <= SEARCH_LIMIT ? null : hits.length;
+  }
+
+  // Name matching is tolerant; email matching is exact on the full address
+  // (utils/studentSearch.js). What comes BACK is governed separately:
+  //
+  //   - a classmate's email is attached only when two or more rows in the
+  //     result share the same normalised name — the one case where the name
+  //     cannot tell them apart;
+  //   - a row found by its email is returned WITHOUT the email: the searcher
+  //     typed it, so echoing it back adds nothing and would confirm a guess;
+  //   - every other row has the email removed before it leaves the server.
+  //
+  // The student number is never in these rows at all.
   searchClassmates(unitId, studentId, { search, tutorial, interest, skill, available }) {
+    this._assertEnrolled(unitId, studentId);
+    const over = this._searchAllowed(unitId, studentId);
+    if (over) {
+      // Username and unit only — never the query text.
+      console.warn('Classmate search rate-limited', { unitId, studentId, count: over });
+      throw new ServiceError(
+        'Too many searches — try again in a few minutes.', 429, 'SEARCH_RATE_LIMITED');
+    }
     let students = this.enrollment.listClassmates(unitId, studentId);
-    // "Available" mirrors exactly what createProposal will accept: the other
-    // team must still be FORMING, and it must not already be your own team.
-    // Anything else renders a Propose Merge button that is guaranteed to fail.
+    // "Available" mirrors exactly what sendRequest will accept: the other
+    // team must not be finalised, and it must not already be your own team.
+    // Anything else renders an "Ask to team up" button that is guaranteed to fail.
     //
     // Opt-in, because the classmate profile page reads this same endpoint and
     // must still resolve a student whose team has since been submitted.
@@ -237,38 +335,80 @@ class StudentPortalService {
     if (available) {
       const myTeamId = this.teams.findStudentTeam(unitId, studentId)?.team_id;
       students = students.filter(s =>
-        (!s.team_status || s.team_status === 'FORMING') &&
+        s.team_status !== 'FINALISED' &&
         (!myTeamId || s.team_id !== myTeamId)
       );
     }
     if (search) {
-      const q = search.toLowerCase();
-      // student_number is `users.student_id` — the n-number a student knows
-      // themselves by. s.student_id is their username. The search box offers
-      // both, so both have to be matched.
-      students = students.filter(s =>
-        (s.name || '').toLowerCase().includes(q) ||
-        (s.student_id || '').toLowerCase().includes(q) ||
-        (s.student_number || '').toLowerCase().includes(q));
+      students = students
+        .map(s => ({ s, m: matchesStudent(search, s) }))
+        .filter(x => x.m.match)
+        .sort((a, b) => (b.m.score - a.m.score) ||
+                        String(a.s.name || '').localeCompare(String(b.s.name || '')))
+        .map(x => x.s);
     }
     if (tutorial) students = students.filter(s => (s.tutorial_slots || s.tutorial_time || '').includes(tutorial));
     if (interest) students = students.filter(s => (s.project_interests || '').includes(interest));
     if (skill)    students = students.filter(s => (s.skills || '').includes(skill));
-    return students;
+
+    // Display rule: email survives only where names collide within this result.
+    const byName = new Map();
+    for (const s of students) {
+      const k = normalise(s.name || '');
+      byName.set(k, (byName.get(k) || 0) + 1);
+    }
+    return students.map(s => {
+      const shared = byName.get(normalise(s.name || '')) > 1;
+      const { email, ...rest } = s;
+      return shared ? { ...rest, email, shared_name: true } : rest;
+    });
   }
 
+  // Re-validates the group on every read. A group that was feasible when it
+  // formed can be put in breach by a later rule or slot change; the student
+  // must learn that here, with the rule named, never by being dissolved.
   getMyTeam(unitId, studentId) {
-    const membership = this.teams.findStudentTeam(unitId, studentId);
-    if (!membership) return { team: null };
+    this._assertEnrolled(unitId, studentId);
+    const { team, noPreferenceAt, placement } = this._standing(unitId, studentId);
+    if (!team) return { team: null, noPreferenceAt, placement };
 
-    const team = this.teams.findById(membership.team_id);
-    const members = this.teams.getMembersDetailed(unitId, membership.team_id);
+    const members = this.teams.getMembersDetailed(unitId, team.team_id);
     const unit = this.units.findById(unitId);
     const validation = validateTeam(members, unit, { tutorialFallback: true });
-    return { team, members, validation };
+    return { team, members, validation, noPreferenceAt, placement,
+             targetSizeLabel: targetSizeLabel(unit) };
   }
 
-  getTeamView(unitId, teamId) {
+  // ── "I have no preferred teammates — place me anywhere" ─────────────────────
+  // A declaration, not a group submission: there is no mutual preference to
+  // record, so it is the solo student's way of saying they are done. Only a
+  // student who is actually alone can make it — someone in a group has a group
+  // to submit instead. Deliberately still allowed after the deadline: a late
+  // declaration still tells the coordinator something useful.
+  declareNoPreference(unitId, studentId) {
+    this._assertEnrolled(unitId, studentId);
+    const membership = this.teams.findStudentTeam(unitId, studentId);
+    const team = membership ? this.teams.findById(membership.team_id) : null;
+    const accepted = team ? this.teams.countMembers(team.team_id) : 0;
+    if (team && team.status === 'FINALISED')
+      throw new ServiceError('Your team has been finalised by your coordinator', 400, 'FINALISED');
+    if (accepted >= 2)
+      throw new ServiceError(
+        'You are in a group — submit the group instead, or leave it first', 400, 'NOT_SOLO');
+
+    const at = new Date().toISOString();
+    this.enrollment.setNoPreference(unitId, studentId, at);
+    return { ok: true, noPreferenceAt: at };
+  }
+
+  withdrawNoPreference(unitId, studentId) {
+    this._assertEnrolled(unitId, studentId);
+    this.enrollment.setNoPreference(unitId, studentId, '');
+    return { ok: true, noPreferenceAt: '' };
+  }
+
+  getTeamView(unitId, teamId, viewerId) {
+    this._assertEnrolled(unitId, viewerId);
     const team = this.teams.findSummaryInUnit(teamId, unitId);
     if (!team) throw new ServiceError('Team not found', 404);
 
@@ -279,43 +419,43 @@ class StudentPortalService {
     return { team, members, maxSize };
   }
 
-  // Ranked merge suggestions for this student. Gated by the same lock as
-  // createProposal — recommending a merge the student cannot act on would be
+  // Ranked team-up suggestions for this student. Gated by the same lock as
+  // sendRequest — recommending a team-up the student cannot act on would be
   // worse than offering nothing.
   autoMatch(unitId, studentId) {
     this._assertOpen(unitId);
     return this.matchingService.suggestForStudent(unitId, studentId);
   }
 
-  // ── Proposals (delegated, with caller-team resolution) ───────────────────────
-  createProposal(unitId, studentId, targetTeamId) {
+  // ── Team-up requests (delegated, with caller-team resolution) ────────────────
+  sendRequest(unitId, studentId, targetTeamId) {
     this._assertOpen(unitId);
     const callerTeam = this.teams.findStudentTeam(unitId, studentId);
     if (!callerTeam) throw new ServiceError('You are not on a team in this unit', 400);
-    const result = this.proposalService.createProposal({
+    const result = this.requests.sendRequest({
       unitId, sourceTeamId: callerTeam.team_id, targetTeamId, initiatorId: studentId,
     });
-    return { proposalId: result.proposalId, state: result.state };
+    return { requestId: result.requestId, state: result.state };
   }
 
-  listProposals(unitId, studentId) {
-    return this.proposalService.listProposalsForStudent(unitId, studentId);
+  listRequests(unitId, studentId) {
+    return this.requests.listRequestsForStudent(unitId, studentId);
   }
 
-  getProposalDetail(unitId, proposalId, studentId) {
-    return this.proposalService.getProposalDetail(unitId, proposalId, studentId);
+  getRequestDetail(unitId, requestId, studentId) {
+    return this.requests.getRequestDetail(unitId, requestId, studentId);
   }
 
-  // Guarded as tightly as createProposal: without this, a request sent before
-  // the deadline could still be accepted afterwards and merge two teams.
-  castVote(proposalId, studentId, vote) {
-    const proposal = this.proposalService.getProposal(proposalId);
-    if (proposal) this._assertOpen(proposal.unit_id);
-    return this.proposalService.castVote({ proposalId, studentId, vote });
+  // Guarded as tightly as sendRequest: without this, a request sent before the
+  // deadline could still be accepted afterwards and join two teams.
+  respondToRequest(requestId, studentId, response) {
+    const request = this.requests.getRequest(requestId);
+    if (request) this._assertOpen(request.unit_id);
+    return this.requests.respondToRequest({ proposalId: requestId, studentId, response });
   }
 
-  markProposalSeen(proposalId, studentId) {
-    this.proposalService.markSeen({ proposalId, studentId });
+  markRequestSeen(requestId, studentId) {
+    this.requests.markRequestSeen({ proposalId: requestId, studentId });
   }
 
   // Once the deadline passes the teacher takes over team formation, so the
@@ -324,16 +464,20 @@ class StudentPortalService {
   _assertOpen(unitId) {
     const unit = this.units.findById(unitId);
     if (isLocked(unit)) {
-      throw new ServiceError('DEADLINE_PASSED', 403);
+      throw new ServiceError('DEADLINE_PASSED', 403, 'DEADLINE_PASSED');
     }
   }
 
   // ── Notifications (delegated) ────────────────────────────────────────────────
+  // Both reads run the producer for the unit first, so the enrolment check has
+  // to come before them: an outsider must not be able to trigger it.
   listNotifications(unitId, studentId) {
+    this._assertEnrolled(unitId, studentId);
     return this.notificationService.list(unitId, studentId);
   }
 
   unreadNotificationCount(unitId, studentId) {
+    this._assertEnrolled(unitId, studentId);
     return this.notificationService.unreadCount(unitId, studentId);
   }
 
@@ -347,15 +491,21 @@ class StudentPortalService {
 
   // ── Membership mutations ─────────────────────────────────────────────────────
   kickMember(unitId, teamId, ownerId, kicked) {
+    // Scoped to the unit in the URL first. The lock check and the kicked
+    // student's replacement team both key off unitId, so a team from another
+    // unit must never get this far — it would dodge that unit's deadline and
+    // create the new team-of-one in the wrong unit.
+    if (!this.teams.findInUnit(teamId, unitId)) throw new ServiceError('Team not found', 404);
     this._assertOpen(unitId);
     const team = this.teams.findOwned(teamId, ownerId);
     if (!team) throw new ServiceError('Only the team creator can remove members', 403);
-    if (team.status !== 'FORMING') throw new ServiceError('Cannot modify a submitted team', 400);
+    if (team.status === 'FINALISED')
+      throw new ServiceError('Your team has been finalised by your coordinator', 400, 'FINALISED');
     if (kicked === ownerId) throw new ServiceError('Use the leave endpoint to remove yourself', 400);
     if (!this.teams.getMembership(teamId, kicked))
       throw new ServiceError('Member not on this team', 404);
 
-    this.proposalService.invalidateProposalsForStudent(kicked);
+    this.requests.invalidateRequestsForStudent(kicked);
     this.teams.removeMember(teamId, kicked);
     this.createTeamOfOne(unitId, kicked);
   }
@@ -364,13 +514,14 @@ class StudentPortalService {
     this._assertOpen(unitId);
     const team = this.teams.findInUnit(teamId, unitId);
     if (!team) throw new ServiceError('Team not found', 404);
-    if (team.status !== 'FORMING') throw new ServiceError('Cannot leave a submitted team', 400);
+    if (team.status === 'FINALISED')
+      throw new ServiceError('Your team has been finalised by your coordinator', 400, 'FINALISED');
     if (!this.teams.getMembership(teamId, studentId))
       throw new ServiceError('You are not in this team', 400);
     if (this.teams.countMembers(teamId) <= 1)
       throw new ServiceError('You are not in a team with anyone to leave', 400);
 
-    this.proposalService.invalidateProposalsForStudent(studentId);
+    this.requests.invalidateRequestsForStudent(studentId);
     this.teams.removeMember(teamId, studentId);
 
     // If the leaver owned the team, hand ownership to a surviving member.
@@ -383,31 +534,16 @@ class StudentPortalService {
     this.createTeamOfOne(unitId, studentId);
   }
 
-  submitTeam(unitId, teamId) {
-    this._assertOpen(unitId);
-    const team = this.teams.findInUnit(teamId, unitId);
-    if (!team) throw new ServiceError('Team not found', 404);
-    if (team.status !== 'FORMING') throw new ServiceError('Team has already been submitted', 400);
+  // Every enrolled student is always on a team — see TeamRepository.createTeamOfOne.
 
-    const members = this.teams.getMembers(teamId);
-    this.teams.markSubmitted(teamId, new Date().toISOString());
-    members.forEach(m => this.progress.markSubmitted(unitId, m.student_id));
-
-    // Submitting locks the team — invalidate any in-flight proposal it touches.
-    this.proposalService.resolveOpenForTeam(teamId);
-  }
-
-  // Eager team-of-1 so every enrolled student is always on a team. Used on join,
-  // and to re-home a student after they leave or are kicked.
   createTeamOfOne(unitId, studentId) {
-    const role = this.prefs.getPreferredRole(unitId, studentId);
-    const number = this.teams.nextTeamNumber(unitId);
-    const teamId = crypto.randomUUID();
-    this.teams.create(teamId, unitId, `Team ${number}`, number, studentId);
-    this.teams.addMember(teamId, studentId, role);
-    this.progress.markInTeam(unitId, studentId);
-    return teamId;
+
+    return this.teams.createTeamOfOne(unitId, studentId, this.prefs.getPreferredRole(unitId, studentId));
+
   }
+
 }
+
+
 
 module.exports = StudentPortalService;

@@ -30,9 +30,12 @@ class UnitRosterRepository extends BaseRepository {
 
   // Roster plus whether that person has actually joined. The roster is keyed by
   // email and enrolment by username, so the link has to go through `users`.
+  // Named columns, not r.*: the roster row also stores the student number
+  // from the CSV, and the panel has no use for it.
   listForUnitWithJoined(unitId) {
     return this.all(
-      `SELECT r.*,
+      `SELECT r.id, r.unit_id, r.email, r.name, r.tutorial_time, r.is_new_to_qut,
+              r.degree, r.major, r.minor, r.invited_at,
               CASE WHEN EXISTS (
                 SELECT 1 FROM users u
                   INNER JOIN unit_students us

@@ -1,54 +1,75 @@
 // =============================================================================
-// ProposalService — unified merge-proposal model.
+// TeamRequestService — team-up requests between two teams.
 //
-// Every student is a team (size-1 by default, eager-created on unit join). Every
-// join action is a vote-gated merge proposal between two teams.
+// Every student is a team (size-1 by default, eager-created on unit join). To
+// team up, one side sends a REQUEST to the other; every accepted member of both
+// teams must ACCEPT it. Unanimous acceptance is the moment students indicate
+// mutual preference, and it IS the record: the two teams become one, and no
+// human approves it afterwards.
+//
+// Rules are evaluated at that moment, twice: when the request is sent (so an
+// infeasible team-up is refused up front, naming the rule and why) and again
+// just before the teams are joined (preferences may have moved in between).
+//
+// Storage keeps the older names — tables `proposals` / `proposal_votes`, state
+// values open|approved|rejected|expired|invalidated|auto_cancelled, vote values
+// pending|yes|no. Renaming them would churn the schema for no user-visible
+// gain. The mapping is: proposal = request, vote yes = accept, vote no =
+// decline, approved = accepted by everyone, rejected = declined.
 //
 // API SHAPES (consumed by the frontend):
 //
-//   POST   /api/student/units/:unitId/proposals     body: { targetTeamId }
-//          → 200 { proposalId, state }
-//          → 400/403/404/409 on validation
+//   POST   /api/student/units/:unitId/team-requests     body: { targetTeamId }
+//          → 200 { requestId, state }
+//          → 400/403/404/409 on validation (400 code RULE names the broken rule)
 //
-//   GET    /api/student/units/:unitId/proposals
+//   GET    /api/student/units/:unitId/team-requests
 //          → 200 [{
-//              proposal_id, state, expires_at, created_at, resolved_at,
-//              // state: open|approved|rejected|expired|invalidated|auto_cancelled
+//              request_id, state, expires_at, created_at, resolved_at,
 //              initiator_id,
 //              source_team_id, source_team_name,
 //              target_team_id, target_team_name,
-//              my_vote, my_seen_at,
-//              tally: { yes, no, pending }
+//              my_response ('pending'|'accept'|'decline'), my_seen_at,
+//              invalidated_reason,
+//              tally: { accepted, declined, pending }
 //            }]
 //
-//   GET    /api/student/units/:unitId/proposals/:id
-//          → 200 { proposal, votes: [{ student_id, name, vote, voted_at, seen_at }] }
+//   GET    /api/student/units/:unitId/team-requests/:id
+//          → 200 { request, responses: [{ student_id, name, response, responded_at, seen_at }] }
 //
-//   PATCH  /api/student/units/:unitId/proposals/:id/vote   body: { vote: 'yes'|'no' }
-//          → 200 { proposalId, state, resolved }
+//   PATCH  /api/student/units/:unitId/team-requests/:id/respond   body: { response: 'accept'|'decline' }
+//          → 200 { requestId, state, resolved }
 //
-//   PATCH  /api/student/units/:unitId/proposals/:id/seen
+//   PATCH  /api/student/units/:unitId/team-requests/:id/seen
 //          → 200 { ok: true }
 //
 // =============================================================================
 
 const crypto = require('crypto');
 const { parseTeamSizesCsv } = require('../utils/teamSizes');
+const { validateTeam } = require('../utils/teamValidator');
 const ServiceError = require('./ServiceError');
 
-// Tunable — how long a proposal stays open before it lapses. Reaching this
-// deadline without unanimous consent expires the proposal; it never merges.
-const PROPOSAL_TIMEOUT_MS = 48 * 60 * 60 * 1000;
+// Tunable — how long a request stays open before it lapses. Reaching this
+// deadline without unanimous acceptance expires the request; the teams never join.
+const REQUEST_TIMEOUT_MS = 48 * 60 * 60 * 1000;
 
 function nowIso() { return new Date().toISOString(); }
 
-class ProposalService {
-  constructor({ db }) {
+const RESPONSE_TO_VOTE = { accept: 'yes', decline: 'no' };
+const VOTE_TO_RESPONSE = { yes: 'accept', no: 'decline', pending: 'pending' };
+
+class TeamRequestService {
+  // `teams` and `units` are what the rule check reads: the combined member
+  // set of both teams, and the unit's rules.
+  constructor({ db, teams, units }) {
     this.db = db;
+    this.teams = teams;
+    this.units = units;
   }
 
-  // Resolve every open proposal touching a team — used when the team locks
-  // (e.g. on submit). resolveProposal sees the non-FORMING state and invalidates.
+  // Resolve every open request touching a team — used when the coordinator
+  // finalises or dissolves it. resolveRequest sees the change and invalidates.
   resolveOpenForTeam(teamId) {
     const inflight = this.db.all(
       `SELECT proposal_id FROM proposals
@@ -56,12 +77,12 @@ class ProposalService {
       [teamId, teamId]
     );
     for (const p of inflight) {
-      try { this.resolveProposal(p.proposal_id); }
+      try { this.resolveRequest(p.proposal_id); }
       catch (e) { console.error('Submit-time proposal resolve failed:', e.message); }
     }
   }
 
-  getProposal(proposalId) {
+  getRequest(proposalId) {
     return this.db.get(`SELECT * FROM proposals WHERE proposal_id = ?`, [proposalId]);
   }
 
@@ -83,10 +104,10 @@ class ProposalService {
     return Math.max(...sizes);
   }
 
-  // ── checkProposal ──────────────────────────────────────────────────────────
+  // ── checkRequest ──────────────────────────────────────────────────────────
   // The preconditions for a merge, as data instead of as a throw.
   //
-  // createProposal calls this first and is the only thing that writes, so a UI
+  // sendRequest calls this first and is the only thing that writes, so a UI
   // asking "could I ask to join that team?" — the forum's recruiting cards — is
   // answered by these exact rules rather than by a second copy of them that
   // drifts the first time one of them changes.
@@ -96,8 +117,8 @@ class ProposalService {
   //
   // Returns { ok: true, sourceMembers, targetMembers, max }
   //      or { ok: false, code, reason, status } — `code` is for branching,
-  //         `reason` is the message createProposal throws verbatim.
-  checkProposal({ unitId, sourceTeamId, targetTeamId, initiatorId }) {
+  //         `reason` is the message sendRequest throws verbatim.
+  checkRequest({ unitId, sourceTeamId, targetTeamId, initiatorId }) {
     const no = (code, reason, status, extra) => ({ ok: false, code, reason, status, ...extra });
 
     if (!targetTeamId)
@@ -111,8 +132,8 @@ class ProposalService {
       [targetTeamId, unitId]);
     if (!source) return no('NO_SOURCE',      'Source team not found in this unit', 404);
     if (!target) return no('NO_TARGET_TEAM', 'Target team not found in this unit', 404);
-    if (source.status !== 'FORMING' || target.status !== 'FORMING')
-      return no('NOT_FORMING', 'Both teams must be in FORMING state', 400);
+    if (source.status === 'FINALISED' || target.status === 'FINALISED')
+      return no('FINALISED', 'That team has been finalised by the coordinator', 400);
 
     const initiatorOk = this.db.get(
       `SELECT 1 AS ok FROM unit_team_members
@@ -128,6 +149,13 @@ class ProposalService {
     if (sourceMembers.length + targetMembers.length > max)
       return no('TOO_BIG', `Combined team size would exceed the max of ${max}`, 400, { max });
 
+    // The unit's hard rules on the team the two would become. This is the
+    // feedback loop: a student learns "no shared tutorial slot — Sam has no
+    // availability saved" at the moment they act, not from a coordinator later.
+    const violation = this._ruleViolation(unitId, sourceTeamId, targetTeamId);
+    if (violation)
+      return no('RULE', `${violation.rule} — ${violation.why}`, 400, { violation });
+
     const duplicate = this.db.get(
       `SELECT 1 AS ok FROM proposals
         WHERE state = 'open'
@@ -141,15 +169,28 @@ class ProposalService {
     return { ok: true, sourceMembers, targetMembers, max };
   }
 
-  // ── createProposal ─────────────────────────────────────────────────────────
-  createProposal({ unitId, sourceTeamId, targetTeamId, initiatorId }) {
-    const check = this.checkProposal({ unitId, sourceTeamId, targetTeamId, initiatorId });
-    if (!check.ok) throw new ServiceError(check.reason, check.status);
+  // First hard-rule violation the combined team would have, or null. Members
+  // are the ACCEPTED ones of both teams, with their current preferences.
+  _ruleViolation(unitId, sourceTeamId, targetTeamId) {
+    const unit = this.units.findById(unitId);
+    if (!unit) return null;
+    const combined = [
+      ...this.teams.getMembersDetailed(unitId, sourceTeamId),
+      ...this.teams.getMembersDetailed(unitId, targetTeamId)
+    ].filter(m => m.status === 'ACCEPTED');
+    const v = validateTeam(combined, unit, { tutorialFallback: true, includeAllAccepted: true });
+    return v.violations[0] || null;
+  }
+
+  // ── sendRequest ─────────────────────────────────────────────────────────
+  sendRequest({ unitId, sourceTeamId, targetTeamId, initiatorId }) {
+    const check = this.checkRequest({ unitId, sourceTeamId, targetTeamId, initiatorId });
+    if (!check.ok) throw new ServiceError(check.reason, check.status, check.code);
     const { sourceMembers, targetMembers } = check;
 
     const proposalId = crypto.randomUUID();
     const now = nowIso();
-    const expiresAt = new Date(Date.now() + PROPOSAL_TIMEOUT_MS).toISOString();
+    const expiresAt = new Date(Date.now() + REQUEST_TIMEOUT_MS).toISOString();
 
     this.db.tx(db => {
       db.run(
@@ -174,25 +215,25 @@ class ProposalService {
     });
 
     // Defensive — a fresh proposal never resolves immediately, but stay consistent.
-    return this.resolveProposal(proposalId, initiatorId);
+    return this.resolveRequest(proposalId, initiatorId);
   }
 
-  // ── castVote ───────────────────────────────────────────────────────────────
-  castVote({ proposalId, studentId, vote }) {
-    if (!['yes', 'no'].includes(vote))
-      throw new ServiceError('vote must be "yes" or "no"', 400);
+  // ── respondToRequest ───────────────────────────────────────────────────────────────
+  respondToRequest({ proposalId, studentId, response }) {
+    const vote = RESPONSE_TO_VOTE[response];
+    if (!vote) throw new ServiceError('response must be "accept" or "decline"', 400);
 
-    const proposal = this.getProposal(proposalId);
+    const proposal = this.getRequest(proposalId);
     if (!proposal) throw new ServiceError('Proposal not found', 404);
     if (proposal.state !== 'open')
-      return { proposalId, state: proposal.state, resolved: true };
+      return { requestId: proposalId, state: proposal.state, resolved: true };
 
     const voteRow = this.db.get(
       `SELECT 1 AS ok FROM proposal_votes WHERE proposal_id = ? AND student_id = ?`,
       [proposalId, studentId]
     );
     if (!voteRow)
-      throw new ServiceError("You are not in this proposal's approver set", 403);
+      throw new ServiceError('This request is not addressed to you', 403);
 
     const now = nowIso();
     this.db.run(
@@ -200,11 +241,11 @@ class ProposalService {
         WHERE proposal_id = ? AND student_id = ?`,
       [vote, now, now, proposalId, studentId]
     );
-    return this.resolveProposal(proposalId, studentId);
+    return this.resolveRequest(proposalId, studentId);
   }
 
   // ── markSeen ───────────────────────────────────────────────────────────────
-  markSeen({ proposalId, studentId }) {
+  markRequestSeen({ proposalId, studentId }) {
     this.db.run(
       `UPDATE proposal_votes SET seen_at = ?
         WHERE proposal_id = ? AND student_id = ? AND seen_at IS NULL`,
@@ -212,7 +253,7 @@ class ProposalService {
     );
   }
 
-  // ── resolveProposal — single source of truth ─────────────────────────────────
+  // ── resolveRequest — single source of truth ─────────────────────────────────
   // Only unanimous, explicit consent merges two teams. Running out the clock
   // lets the proposal lapse; silence is NOT consent.
   //
@@ -221,13 +262,13 @@ class ProposalService {
   //   2. Any vote='no'             → reject.
   //   3. Not allYes AND expired    → expire (nothing is mutated).
   //   4. Not allYes AND not expired→ leave open.
-  //   5. allYes AND a team is no longer FORMING → invalidate.
+  //   5. allYes AND a team is FINALISED or a rule now fails → invalidate.
   //   6. allYes                    → approve + execute merge.
-  resolveProposal(proposalId, actingVoter = null) {
-    const proposal = this.getProposal(proposalId);
+  resolveRequest(proposalId, actingVoter = null) {
+    const proposal = this.getRequest(proposalId);
     if (!proposal) throw new ServiceError('Proposal not found', 404);
     if (proposal.state !== 'open')
-      return { proposalId, state: proposal.state, resolved: true };
+      return { requestId: proposalId, state: proposal.state, resolved: true };
 
     const votes = this.getVotes(proposalId);
     const hasNo = votes.some(v => v.vote === 'no');
@@ -244,7 +285,7 @@ class ProposalService {
         );
         this.resetSeenAtExceptActor(db, proposalId, actingVoter);
       });
-      return { proposalId, state: 'rejected', resolved: true };
+      return { requestId: proposalId, state: 'rejected', resolved: true };
     }
 
     // 3/4. Without unanimous consent the deadline lapses the proposal rather
@@ -252,7 +293,7 @@ class ProposalService {
     // just before the sweep still merges instead of being killed by the clock.
     if (!allYes) {
       if (!expired)
-        return { proposalId, state: 'open', resolved: false };
+        return { requestId: proposalId, state: 'open', resolved: false };
 
       // Expired → no team is mutated, so team status is irrelevant here.
       this.db.tx(db => {
@@ -262,32 +303,42 @@ class ProposalService {
         );
         this.resetSeenAtExceptActor(db, proposalId, actingVoter);
       });
-      return { proposalId, state: 'expired', resolved: true };
+      return { requestId: proposalId, state: 'expired', resolved: true };
     }
 
-    // 5. Approving, but a team has left FORMING (e.g., submitted) → invalidate.
+    // 5. Everyone accepted, but a team was finalised meanwhile, or the two
+    //    would now break a rule (preferences moved since the request was
+    //    sent) → invalidate, recording why so the notification can say.
     const source = this.db.get(`SELECT status FROM unit_teams WHERE team_id = ?`,
       [proposal.source_team_id]);
     const target = this.db.get(`SELECT status FROM unit_teams WHERE team_id = ?`,
       [proposal.target_team_id]);
-    if (!source || !target ||
-        source.status !== 'FORMING' || target.status !== 'FORMING') {
+    let invalidReason = null;
+    if (!source || !target) invalidReason = 'One of the teams no longer exists';
+    else if (source.status === 'FINALISED' || target.status === 'FINALISED')
+      invalidReason = 'A team was finalised by the coordinator';
+    else {
+      const v = this._ruleViolation(proposal.unit_id, proposal.source_team_id, proposal.target_team_id);
+      if (v) invalidReason = `${v.rule} — ${v.why}`;
+    }
+    if (invalidReason) {
       this.db.tx(db => {
         db.run(
-          `UPDATE proposals SET state = 'invalidated', resolved_at = ? WHERE proposal_id = ?`,
-          [now, proposalId]
+          `UPDATE proposals SET state = 'invalidated', resolved_at = ?, invalidated_reason = ?
+            WHERE proposal_id = ?`,
+          [now, invalidReason, proposalId]
         );
         this.resetSeenAtExceptActor(db, proposalId, actingVoter);
       });
-      return { proposalId, state: 'invalidated', resolved: true };
+      return { requestId: proposalId, state: 'invalidated', resolved: true, reason: invalidReason };
     }
 
     // 6. Approve + merge + auto-cancel conflicts — all in one transaction.
     this.db.tx(db => {
-      this.executeMerge(db, proposal, proposalId, now, actingVoter);
+      this.joinTeams(db, proposal, proposalId, now, actingVoter);
     });
 
-    return { proposalId, state: 'approved', resolved: true };
+    return { requestId: proposalId, state: 'approved', resolved: true };
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -296,7 +347,7 @@ class ProposalService {
   // row is deleted and its members are UPDATEd to the surviving team_id.
   // (team_number is unique per unit, so ties don't occur.)
   // ───────────────────────────────────────────────────────────────────────────
-  executeMerge(db, proposal, proposalId, now, actingVoter) {
+  joinTeams(db, proposal, proposalId, now, actingVoter) {
     const src = this.db.get(`SELECT team_number FROM unit_teams WHERE team_id = ?`,
       [proposal.source_team_id]);
     const tgt = this.db.get(`SELECT team_number FROM unit_teams WHERE team_id = ?`,
@@ -323,6 +374,19 @@ class ProposalService {
       `UPDATE proposals SET state = 'approved', resolved_at = ? WHERE proposal_id = ?`,
       [now, proposalId]
     );
+
+    // Everyone on both sides is now in a group of 2+. A "place me anywhere"
+    // declaration made while alone no longer describes what they want, and a
+    // stale declaration shown as current intent is worse than none. Raw handle:
+    // this runs inside the merge transaction, so it commits or rolls back with it.
+    const everyone = [...winnerMembers, ...loserMembers];
+    if (everyone.length) {
+      db.run(
+        `UPDATE unit_students SET no_preference_at = ''
+          WHERE unit_id = ? AND student_id IN (${everyone.map(() => '?').join(',')})`,
+        [proposal.unit_id, ...everyone]
+      );
+    }
 
     // Auto-cancel every other open proposal touching either team — same tx.
     const conflicts = this.db.all(
@@ -376,7 +440,7 @@ class ProposalService {
     let count = 0;
     for (const row of expired) {
       try {
-        this.resolveProposal(row.proposal_id);
+        this.resolveRequest(row.proposal_id);
         count++;
       } catch (e) {
         console.error(`Proposal sweep failed for ${row.proposal_id}:`, e.message);
@@ -385,11 +449,11 @@ class ProposalService {
     return count;
   }
 
-  // ── invalidateProposalsForStudent ──────────────────────────────────────────
+  // ── invalidateRequestsForStudent ──────────────────────────────────────────
   // Called when a student leaves their team or is kicked. Flips every open
   // proposal they're in to 'invalidated'. The acting student keeps their seen_at;
   // everyone else gets a fresh badge.
-  invalidateProposalsForStudent(studentId) {
+  invalidateRequestsForStudent(studentId) {
     const affected = this.db.all(
       `SELECT DISTINCT p.proposal_id FROM proposals p
          INNER JOIN proposal_votes pv ON pv.proposal_id = p.proposal_id
@@ -464,13 +528,13 @@ class ProposalService {
     return open.length;
   }
 
-  // ── listProposalsForStudent ─────────────────────────────────────────────────
+  // ── listRequestsForStudent ─────────────────────────────────────────────────
   // Returns: every OPEN proposal the student is in, plus terminal proposals
   // with my_seen_at IS NULL (so the user can ack a recent outcome).
-  listProposalsForStudent(unitId, studentId) {
+  listRequestsForStudent(unitId, studentId) {
     const rows = this.db.all(
       `SELECT p.proposal_id, p.state, p.expires_at, p.created_at, p.resolved_at,
-              p.initiator_id, p.cancelled_by_student_ids,
+              p.initiator_id, p.cancelled_by_student_ids, p.invalidated_reason,
               p.source_team_id, ts.team_name AS source_team_name,
               p.target_team_id, tt.team_name AS target_team_name,
               pv.vote AS my_vote, pv.seen_at AS my_seen_at,
@@ -491,8 +555,10 @@ class ProposalService {
       [studentId, unitId]
     );
     return this.attachCancelledBy(unitId, rows).map(r => ({
-      proposal_id: r.proposal_id,
+      request_id: r.proposal_id,
+      proposal_id: r.proposal_id,   // legacy alias, one release
       state: r.state,
+      invalidated_reason: r.invalidated_reason || null,
       expires_at: r.expires_at,
       created_at: r.created_at,
       resolved_at: r.resolved_at,
@@ -501,15 +567,15 @@ class ProposalService {
       source_team_name: r.source_team_name,
       target_team_id: r.target_team_id,
       target_team_name: r.target_team_name,
-      my_vote: r.my_vote,
+      my_response: VOTE_TO_RESPONSE[r.my_vote] || r.my_vote,
       my_seen_at: r.my_seen_at,
       cancelled_by: r.cancelled_by,
-      tally: { yes: r.yes_count, no: r.no_count, pending: r.pending_count }
+      tally: { accepted: r.yes_count, declined: r.no_count, pending: r.pending_count }
     }));
   }
 
-  // ── getProposalDetail ───────────────────────────────────────────────────────
-  getProposalDetail(unitId, proposalId, studentId) {
+  // ── getRequestDetail ───────────────────────────────────────────────────────
+  getRequestDetail(unitId, proposalId, studentId) {
     const proposal = this.db.get(
       `SELECT p.*, ts.team_name AS source_team_name, tt.team_name AS target_team_name
          FROM proposals p
@@ -536,13 +602,16 @@ class ProposalService {
       [unitId, proposalId]
     );
     // Same helper as the list, so the popup names exactly who the row names.
-    return { proposal: this.attachCancelledBy(unitId, [proposal])[0], votes };
+    const request = this.attachCancelledBy(unitId, [proposal])[0];
+    return {
+      request: { ...request, request_id: request.proposal_id },
+      responses: votes.map(v => ({
+        student_id: v.student_id, name: v.name, seen_at: v.seen_at,
+        response: VOTE_TO_RESPONSE[v.vote] || v.vote, responded_at: v.voted_at
+      }))
+    };
   }
 }
 
-ProposalService.ServiceError = ServiceError;
-ProposalService.PROPOSAL_TIMEOUT_MS = PROPOSAL_TIMEOUT_MS;
-
-module.exports = ProposalService;
-module.exports.ServiceError = ServiceError;
-module.exports.PROPOSAL_TIMEOUT_MS = PROPOSAL_TIMEOUT_MS;
+TeamRequestService.REQUEST_TIMEOUT_MS = REQUEST_TIMEOUT_MS;
+module.exports = TeamRequestService;

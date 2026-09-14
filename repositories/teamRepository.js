@@ -3,7 +3,18 @@ const BaseRepository = require('./BaseRepository');
 // Data access for unit-scoped teams (`unit_teams`) and their membership
 // (`unit_team_members`). These two tables form one aggregate, so they share a
 // repository.
+//
+// Team status is one of exactly two values, named from the coordinator's point
+// of view:
+//   OPEN       the group exists and students can still change it
+//   FINALISED  the coordinator has allocated it; students can no longer change it
+// There is no student-performed transition: an accepted team-up request IS the
+// record, and the unit's deadline is the only student-side freeze.
+const STATUSES = ['OPEN', 'FINALISED'];
+
 class TeamRepository extends BaseRepository {
+  static get STATUSES() { return STATUSES; }
+
   findById(teamId) {
     return this.get(`SELECT * FROM unit_teams WHERE team_id = ?`, [teamId]);
   }
@@ -49,6 +60,22 @@ class TeamRepository extends BaseRepository {
     return this.all(`SELECT 1 FROM unit_team_members WHERE team_id = ?`, [teamId]).length;
   }
 
+  // Every student's team in a unit, one row each, with the accepted-member
+  // count of that team. The single query behind placement categorisation —
+  // the class list, export and notification producers all need it for a whole
+  // unit at once, and per-student lookups would be N+1.
+  listMembershipsWithSizes(unitId) {
+    return this.all(
+      `SELECT tm.student_id, t.team_id, t.team_name, t.team_number, t.status, t.submitted_at,
+              (SELECT COUNT(*) FROM unit_team_members x
+                WHERE x.team_id = t.team_id AND x.status = 'ACCEPTED') AS accepted_count
+         FROM unit_team_members tm
+         INNER JOIN unit_teams t ON t.team_id = tm.team_id
+        WHERE t.unit_id = ?`,
+      [unitId]
+    );
+  }
+
   nextTeamNumber(unitId) {
     const row = this.get(`SELECT MAX(team_number) AS m FROM unit_teams WHERE unit_id = ?`, [unitId]);
     return (row?.m || 0) + 1;
@@ -57,9 +84,39 @@ class TeamRepository extends BaseRepository {
   create(teamId, unitId, name, number, createdBy) {
     this.run(
       `INSERT INTO unit_teams (team_id, unit_id, team_name, team_number, created_by, status)
-       VALUES (?,?,?,?,?, 'FORMING')`,
+       VALUES (?,?,?,?,?, 'OPEN')`,
       [teamId, unitId, name, number, createdBy]
     );
+  }
+
+  // Eager team-of-one so every enrolled student is always on a team. Used on
+  // join, when a student leaves or is kicked, and when the coordinator
+  // dissolves a group. Returns the new team id.
+  createTeamOfOne(unitId, studentId, role = '') {
+    const number = this.nextTeamNumber(unitId);
+    const teamId = require('crypto').randomUUID();
+    this.create(teamId, unitId, `Team ${number}`, number, studentId);
+    this.addMember(teamId, studentId, role);
+    return teamId;
+  }
+
+  // Re-creates a team row exactly as snapshotted (batch revert). The status and
+  // stamps come back too, so a reverted team is indistinguishable from before.
+  restore(t) {
+    this.run(
+      `INSERT OR REPLACE INTO unit_teams
+         (team_id, unit_id, team_name, team_number, created_by, status, submitted_at,
+          quality_score, last_rejected_at, finalised_at, finalise_batch_id, reopened_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [t.team_id, t.unit_id, t.team_name, t.team_number, t.created_by, t.status,
+       t.submitted_at || '', t.quality_score || 0, t.last_rejected_at || '',
+       t.finalised_at || '', t.finalise_batch_id || '', t.reopened_at || '']
+    );
+  }
+
+  deleteTeam(teamId) {
+    this.run(`DELETE FROM unit_team_members WHERE team_id = ?`, [teamId]);
+    this.run(`DELETE FROM unit_teams WHERE team_id = ?`, [teamId]);
   }
 
   addMember(teamId, studentId, role) {
@@ -87,18 +144,49 @@ class TeamRepository extends BaseRepository {
     this.run(`UPDATE unit_teams SET created_by = ? WHERE team_id = ?`, [newOwnerId, teamId]);
   }
 
-  markSubmitted(teamId, submittedAt) {
-    this.run(`UPDATE unit_teams SET status = 'SUBMITTED', submitted_at = ? WHERE team_id = ?`,
-      [submittedAt, teamId]);
+  // The coordinator's two overrides. `batchId` ties a team to the organiser save
+  // that finalised it so the whole batch can be reverted as a unit; '' for a
+  // team finalised on its own.
+  setFinalised(teamId, at, batchId = '') {
+    this.run(
+      `UPDATE unit_teams SET status = 'FINALISED', finalised_at = ?, finalise_batch_id = ?
+        WHERE team_id = ?`,
+      [at, batchId, teamId]);
   }
 
-  setStatus(teamId, status) {
-    this.run(`UPDATE unit_teams SET status = ? WHERE team_id = ?`, [status, teamId]);
+  setReopened(teamId, at) {
+    this.run(
+      `UPDATE unit_teams SET status = 'OPEN', reopened_at = ?, finalise_batch_id = ''
+        WHERE team_id = ?`,
+      [at, teamId]);
   }
 
-  setRejected(teamId, rejectedAt) {
-    this.run(`UPDATE unit_teams SET status = 'FORMING', last_rejected_at = ? WHERE team_id = ?`,
-      [rejectedAt, teamId]);
+  listByBatch(batchId) {
+    return this.all(`SELECT * FROM unit_teams WHERE finalise_batch_id = ?`, [batchId]);
+  }
+
+  // Every team in the unit with its detailed members, in ONE query. The
+  // per-team getMembersDetailed below is right for a single team; looping it
+  // over a unit is an N+1 that the export, the matcher, the rules-impact
+  // preview and the boot re-validation all used to make. Returns
+  // [{ ...team, members: [...] }], including teams with no members.
+  listWithMembersDetailed(unitId) {
+    const teams = this.all(
+      `SELECT * FROM unit_teams WHERE unit_id = ? ORDER BY team_number, rowid`, [unitId]);
+    const byId = new Map(teams.map(t => [t.team_id, { ...t, members: [] }]));
+    const rows = this.all(
+      `SELECT tm.team_id, tm.student_id, tm.status, us.name, us.is_new_to_qut,
+              sup.tutorial_slots, us.tutorial_time,
+              COALESCE(NULLIF(sup.preferred_role, ''), tm.role) AS role
+         FROM unit_team_members tm
+         INNER JOIN unit_teams t ON t.team_id = tm.team_id
+         INNER JOIN unit_students us ON us.unit_id = t.unit_id AND us.student_id = tm.student_id
+         LEFT JOIN student_unit_prefs sup ON sup.unit_id = t.unit_id AND sup.student_id = tm.student_id
+        WHERE t.unit_id = ?`,
+      [unitId]
+    );
+    for (const r of rows) byId.get(r.team_id)?.members.push(r);
+    return [...byId.values()];
   }
 
   // Members joined with their roster + saved prefs. Used by my-team and all-teams.
@@ -177,40 +265,6 @@ class TeamRepository extends BaseRepository {
     );
   }
 
-  listSubmitted(unitId) {
-    return this.all(`SELECT team_id FROM unit_teams WHERE unit_id = ? AND status = 'SUBMITTED'`,
-      [unitId]);
-  }
-
-  // Atomically approve every SUBMITTED team in a unit and mark each member
-  // teacher_approved. Returns the number of teams approved.
-  approveAllSubmitted(unitId) {
-    const teams = this.listSubmitted(unitId);
-    if (!teams.length) return 0;
-
-    const memberRows = this.all(
-      `SELECT tm.team_id, tm.student_id
-         FROM unit_team_members tm
-         INNER JOIN unit_teams t ON t.team_id = tm.team_id
-        WHERE t.unit_id = ? AND t.status = 'SUBMITTED'`,
-      [unitId]
-    );
-
-    this.db.tx(db => {
-      for (const t of teams) {
-        db.run(`UPDATE unit_teams SET status = 'APPROVED' WHERE team_id = ?`, [t.team_id]);
-      }
-      for (const m of memberRows) {
-        db.run(
-          `UPDATE student_progress SET teacher_approved = 1
-            WHERE unit_id = ? AND student_id = ?`,
-          [unitId, m.student_id]
-        );
-      }
-    });
-
-    return teams.length;
-  }
 }
 
 module.exports = TeamRepository;

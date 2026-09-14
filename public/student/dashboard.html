@@ -134,10 +134,10 @@
             <button class="t-open-btn" style="margin-top:14px;width:160px"
                     onclick="goTo('my-team')">View My Team</button>
         </div>
-        <!-- Merge proposals -->
+        <!-- Team-up requests -->
         <div class="s-card" id="invites-card" style="display:none">
             <h3 style="font-size:17px;font-weight:800;margin-bottom:14px">
-                📬 Merge Proposals
+                📬 Team-up requests
                 <span id="invite-count-badge" style="background:#e94560;color:#fff;font-size:12px;font-weight:700;padding:2px 8px;border-radius:20px;margin-left:8px"></span>
             </h3>
             <div id="race-warning" class="s-race-warning" style="display:none"></div>
@@ -173,7 +173,7 @@
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/student-nav.js"></script>
 <script>
-    let unitId, progress, myStudentId, myTeamId, myProposals = [];
+    let unitId, progress, myStudentId, myTeamId, myRequests = [];
 
     const escapeHtml = value => String(value ?? '')
         .replaceAll('&', '&amp;')
@@ -183,17 +183,17 @@
         .replaceAll("'", '&#039;');
 
     // ── Competing acceptances ────────────────────────────────────────
-    // Only one open proposal can ever take effect: the first to reach all-yes
-    // merges and auto-cancels the rest. A "commitment" is any open proposal
-    // where I have already said yes — which includes ones I *sent*, since
-    // createProposal auto-votes the initiator yes.
-    function outstandingCommitments(excludeProposalId) {
-        return myProposals.filter(p =>
-            p.state === 'open' && p.my_vote === 'yes' && p.proposal_id !== excludeProposalId);
+    // Only one open request can ever take effect: the first that everyone
+    // accepts joins the teams and withdraws the rest. A "commitment" is any open
+    // request I have already accepted — which includes ones I *sent*, since
+    // sending counts as the sender's acceptance.
+    function outstandingCommitments(excludeRequestId) {
+        return myRequests.filter(p =>
+            p.state === 'open' && p.my_response === 'accept' && p.request_id !== excludeRequestId);
     }
 
-    // The side of a proposal that isn't mine. A team merged away has a NULL
-    // name (LEFT JOIN on a deleted row), hence the fallbacks.
+    // The side of a request that isn't mine. A team that joined another has a
+    // NULL name (LEFT JOIN on a deleted row), hence the fallbacks.
     function otherTeamName(p) {
         const other = p.source_team_id === myTeamId ? p.target_team_name : p.source_team_name;
         return other || p.target_team_name || p.source_team_name || 'another team';
@@ -207,26 +207,26 @@
             : `${other}'s request`;
     }
 
-    // You are "committed" if you sent the request (createProposal auto-votes the
-    // initiator yes) or you accepted it. Either way there is nothing left to say
-    // yes to — only to call it off. Check initiator first: a sender always has
-    // my_vote === 'yes' too.
-    function commitmentView(initiatorId, myVote) {
+    // You are "committed" if you sent the request (sending counts as your
+    // acceptance) or you accepted it. Either way there is nothing left to accept
+    // — only to call it off. Check initiator first: a sender always has
+    // my_response === 'accept' too.
+    function commitmentView(initiatorId, myResponse) {
         const sent = initiatorId === myStudentId;
         return {
-            committed: sent || myVote === 'yes',
+            committed: sent || myResponse === 'accept',
             actionLabel: sent ? 'Cancel request' : 'Withdraw',
             statusLabel: sent ? 'You sent this request' : 'You accepted'
         };
     }
 
-    // Both sides of an auto-cancelled request see it, but only one of them
-    // actually merged — so the reason has to be phrased per viewer. The backend
-    // records who moved at cancel time; rows cancelled before that shipped have
+    // Both sides of a withdrawn request see it, but only one of them actually
+    // joined another team — so the reason has to be phrased per viewer. The
+    // backend records who moved at the time; rows from before that shipped have
     // nobody recorded and fall back to a neutral statement.
     function cancelledReason(p) {
         const movers = p.cancelled_by || [];
-        if (!movers.length) return 'another merge completed first';
+        if (!movers.length) return 'another team-up completed first';
         if (movers.some(m => m.student_id === myStudentId)) return 'you joined another team';
         const names = movers.map(m => m.name || m.student_id);
         const who = names.length === 1 ? names[0]
@@ -241,12 +241,13 @@
         return `${labels.slice(0, 2).join(', ')} and ${labels.length - 2} other${labels.length - 2 > 1 ? 's' : ''}`;
     }
 
+    // Two stages you do yourself, two the system derives: grouped (or declared)
+    // from your team, finalised from your coordinator's allocation.
     const STAGES = [
         { key:'read_rules',          label:'Read rules' },
         { key:'entered_preferences', label:'Enter preferences' },
-        { key:'in_team',             label:'Build or join team' },
-        { key:'submitted_request',   label:'Submit team request' },
-        { key:'teacher_approved',    label:'Teacher review' },
+        { key:'grouped',             label:'Team up (or declare no preference)' },
+        { key:'finalised',           label:'Finalised by coordinator' },
     ];
 
     (async () => {
@@ -264,9 +265,9 @@
         myTeamId = teamData.team?.team_id;
 
         // After my-team: the rows need myTeamId to name the other side of a request.
-        await loadProposals();
+        await loadRequests();
 
-        // Once the deadline passes the merge buttons all 403; say so up front
+        // Once the deadline passes the team-up buttons all 403; say so up front
         // rather than letting students discover it by being refused.
         // Guarded: the banner is advisory, and the server enforces the lock
         // regardless — it must never be able to take down the whole dashboard.
@@ -290,19 +291,21 @@
 
         // Team status
         if (teamData.team) {
+            const n = teamData.members.length;
             document.getElementById('team-status-text').textContent =
-                teamData.team.status === 'SUBMITTED' ? 'Submitted — awaiting teacher review' :
-                    teamData.team.status === 'APPROVED'  ? 'Approved!' :
-                        `${teamData.members.length} member${teamData.members.length!==1?'s':''}`;
+                teamData.team.status === 'FINALISED' ? `Finalised — group of ${n}` :
+                    teamData.placement === 'DECLARED' ? 'Asked to be placed anywhere' :
+                    n >= 2 ? `Group of ${n} — recorded` :
+                    'On your own — team up or declare no preference';
         } else {
-            document.getElementById('team-status-text').textContent = 'Incomplete — You have not submitted yet.';
+            document.getElementById('team-status-text').textContent = 'No team yet.';
         }
 
         // Progress rows
         const rows = document.getElementById('progress-rows');
         rows.innerHTML = STAGES.map(s => {
             const done = prog[s.key] === 1;
-            const locked = s.key === 'teacher_approved' && !prog.submitted_request;
+            const locked = s.key === 'finalised' && !prog.grouped;
             let dotClass = locked ? 's-dot-gray' : (done ? 't-dot-green' : 't-dot-red');
             let statusText = locked ? 'Locked' : (done ? 'Completed' : (s.key==='read_rules' ? 'Not started' : 'In progress'));
             let statusClass = locked ? 'locked' : (done ? 'completed' : (s.key==='read_rules'&&!done ? 'not-started':'in-progress'));
@@ -318,9 +321,8 @@
         if (!progress) return;
         if (!progress.read_rules)          { goTo('rules'); return; }
         if (!progress.entered_preferences) { goTo('preferences'); return; }
-        if (!progress.in_team)             { goTo('find-teammates'); return; }
-        if (!progress.submitted_request)   { goTo('my-team'); return; }
-        goTo('status');
+        if (!progress.grouped)             { goTo('find-teammates'); return; }
+        goTo('my-team');
     }
 
     function goTo(page, extra = '') {
@@ -334,14 +336,14 @@
         if (commitments.length < 2) { el.style.display = 'none'; return; }
         el.style.display = 'block';
         el.innerHTML = `⚠ You've committed to ${commitments.length} requests
-            (${escapeHtml(commitmentList(commitments))}). Whichever team finishes voting first is the
-            one you'll join — the rest will be cancelled.`;
+            (${escapeHtml(commitmentList(commitments))}). Whichever team finishes accepting first is the
+            one you'll join — the rest will be withdrawn.`;
     }
 
-    async function loadProposals() {
+    async function loadRequests() {
         try {
-            const proposals = await get(`/api/student/units/${unitId}/proposals`);
-            myProposals = proposals;
+            const proposals = await get(`/api/student/units/${unitId}/team-requests`);
+            myRequests = proposals;
             const card = document.getElementById('invites-card');
             const list = document.getElementById('invites-list');
 
@@ -355,15 +357,19 @@
             list.innerHTML = proposals.map(p => {
                 const isOpen = p.state === 'open';
                 const stateLabel = isOpen
-                    ? `${p.tally.yes}/${p.tally.yes + p.tally.no + p.tally.pending} yes`
+                    ? `${p.tally.accepted}/${p.tally.accepted + p.tally.declined + p.tally.pending} accepted`
                     : p.state === 'auto_cancelled'
-                        ? `cancelled — ${cancelledReason(p)}`
+                        ? `withdrawn — ${cancelledReason(p)}`
                         : p.state === 'expired'
                             ? 'expired — nobody responded in time'
-                            : p.state.replace('_', ' ');
+                            : p.state === 'approved' ? 'accepted — you are one group'
+                            : p.state === 'rejected' ? 'declined'
+                            : p.state === 'invalidated'
+                                ? `no longer valid${p.invalidated_reason ? ' — ' + p.invalidated_reason : ''}`
+                                : p.state.replace('_', ' ');
                 const otherName = p.source_team_name && p.target_team_name
                     ? `${p.source_team_name} ↔ ${p.target_team_name}`
-                    : 'merge proposal';
+                    : 'team-up request';
                 // An open proposal lapses at expires_at unless everyone accepts,
                 // so surface the deadline, not just the tally.
                 let deadline = '';
@@ -371,91 +377,93 @@
                     const hrs = Math.round((Date.parse(p.expires_at) - Date.now()) / 3600000);
                     deadline = hrs <= 0
                         ? ' · expiring shortly'
-                        : p.my_vote === 'pending'
+                        : p.my_response === 'pending'
                             ? ` · auto-declines in ${hrs}h`
                             : ` · expires in ${hrs}h`;
                 }
                 // Once committed there is nothing to accept — only to call off.
                 const { committed, actionLabel, statusLabel } =
-                    commitmentView(p.initiator_id, p.my_vote);
+                    commitmentView(p.initiator_id, p.my_response);
                 const status = isOpen && committed
                     ? statusLabel
-                    : `Your vote: ${p.my_vote}`;
+                    : `Your response: ${p.my_response === 'accept' ? 'accepted' : p.my_response === 'decline' ? 'declined' : 'none'}`;
                 return `
-                  <div class="invite-row" id="invite-row-${p.proposal_id}">
+                  <div class="invite-row" id="invite-row-${p.request_id}">
                     <div class="invite-info">
                       <strong>${escapeHtml(otherName)}</strong>
                       <br><span>${escapeHtml(status)} · ${escapeHtml(stateLabel)}${escapeHtml(deadline)}</span>
                     </div>
                     <div class="invite-actions">
-                      <button class="btn-details" onclick="openDetails('${p.proposal_id}')">Details</button>
+                      <button class="btn-details" onclick="openDetails('${p.request_id}')">Details</button>
                       ${!isOpen ? `
-                        <button class="btn-decline" onclick="dismissProposal('${p.proposal_id}')">Dismiss</button>
+                        <button class="btn-decline" onclick="dismissRequest('${p.request_id}')">Dismiss</button>
                       ` : committed ? `
-                        <button class="btn-decline" onclick="castVote('${p.proposal_id}','no')">${actionLabel}</button>
+                        <button class="btn-decline" onclick="respond('${p.request_id}','decline')">${actionLabel}</button>
                       ` : `
-                        <button class="btn-accept"  onclick="castVote('${p.proposal_id}','yes')">Yes</button>
-                        <button class="btn-decline" onclick="castVote('${p.proposal_id}','no')">No</button>
+                        <button class="btn-accept"  onclick="respond('${p.request_id}','accept')">Accept</button>
+                        <button class="btn-decline" onclick="respond('${p.request_id}','decline')">Decline</button>
                       `}
                     </div>
                   </div>
                 `;
             }).join('');
         } catch(e) {
-            console.error('Could not load proposals:', e);
+            console.error('Could not load team-up requests:', e);
         }
     }
 
-    async function castVote(proposalId, vote) {
+    async function respond(requestId, response) {
         // Accepting a second request is a real decision: both acceptances are
         // binding and the winner is decided by other people's timing. Declining
         // is never ambiguous, so it is never gated.
-        if (vote === 'yes') {
-            const others = outstandingCommitments(proposalId);
+        if (response === 'accept') {
+            const others = outstandingCommitments(requestId);
             if (others.length && !confirm(
                     `You've already committed to ${commitmentList(others)}.\n\n` +
-                    `Accepting this one as well means whichever team finishes voting first is the ` +
-                    `one you'll join — the other will be cancelled.\n\nAccept anyway?`)) {
+                    `Accepting this one as well means whichever team finishes accepting first is the ` +
+                    `one you'll join — the other will be withdrawn.\n\nAccept anyway?`)) {
                 return;
             }
         }
         try {
             const result = await api('PATCH',
-                `/api/student/units/${unitId}/proposals/${proposalId}/vote`, { vote });
+                `/api/student/units/${unitId}/team-requests/${requestId}/respond`, { response });
             if (result.resolved && result.state === 'approved') {
                 window.location.reload();
             } else {
-                await loadProposals();
+                if (result.state === 'invalidated' && result.reason)
+                    alert(`This request can no longer go ahead: ${result.reason}`);
+                await loadRequests();
             }
         } catch(e) {
-            alert('Could not cast vote: ' + e.message);
+            alert('Could not respond: ' + e.message);
         }
     }
 
-    async function dismissProposal(proposalId) {
+    async function dismissRequest(requestId) {
         try {
-            await api('PATCH', `/api/student/units/${unitId}/proposals/${proposalId}/seen`);
-            await loadProposals();
+            await api('PATCH', `/api/student/units/${unitId}/team-requests/${requestId}/seen`);
+            await loadRequests();
         } catch(e) { console.error(e); }
     }
 
     // ── Request details popup ────────────────────────────────────────
-    // Everything below reads from two existing endpoints: the proposal detail
-    // (names + each member's vote) and the per-team view (roster + max size).
-    async function openDetails(proposalId) {
+    // Everything below reads from two existing endpoints: the request detail
+    // (names + each member's response) and the per-team view (roster + max size).
+    async function openDetails(requestId) {
         const body = document.getElementById('details-body');
         body.innerHTML = `<p style="color:#888">Loading…</p>`;
         document.getElementById('details-modal').classList.add('open');
 
         try {
-            const detail = await get(`/api/student/units/${unitId}/proposals/${proposalId}`);
-            // On approval the losing team row is deleted, so one of these can 404.
+            const detail = await get(`/api/student/units/${unitId}/team-requests/${requestId}`);
+            // Once accepted, the joining team's row is deleted, so one of these can 404.
             const [srcView, tgtView] = await Promise.all([
-                get(`/api/student/units/${unitId}/teams/${detail.proposal.source_team_id}`).catch(() => null),
-                get(`/api/student/units/${unitId}/teams/${detail.proposal.target_team_id}`).catch(() => null)
+                get(`/api/student/units/${unitId}/teams/${detail.request.source_team_id}`).catch(() => null),
+                get(`/api/student/units/${unitId}/teams/${detail.request.target_team_id}`).catch(() => null)
             ]);
             // Identify my side by roster membership, not team id — stays correct
-            // after a merge has moved my membership to the surviving team.
+            // after a team-up has moved my membership to the surviving team.
             const mineIsSource = (srcView?.members || []).some(m => m.student_id === myStudentId);
             const myView    = mineIsSource ? srcView : tgtView;
             const otherView = mineIsSource ? tgtView : srcView;
@@ -471,20 +479,20 @@
     }
 
     function voteChip(member, detail, voteBy) {
-        if (member.student_id === detail.proposal.initiator_id)
+        if (member.student_id === detail.request.initiator_id)
             return `<span class="s-vote-chip initiator">sent request</span>`;
         const v = voteBy.get(member.student_id);
-        if (!v)              return `<span class="s-vote-chip">—</span>`;
-        if (v.vote === 'yes') return `<span class="s-vote-chip yes">✓ agreed</span>`;
-        if (v.vote === 'no')  return `<span class="s-vote-chip no">✕ declined</span>`;
+        if (!v)                       return `<span class="s-vote-chip">—</span>`;
+        if (v.response === 'accept')  return `<span class="s-vote-chip yes">✓ accepted</span>`;
+        if (v.response === 'decline') return `<span class="s-vote-chip no">✕ declined</span>`;
         return member.student_id === myStudentId
-            ? `<span class="s-vote-chip">awaiting your vote</span>`
+            ? `<span class="s-vote-chip">awaiting your response</span>`
             : `<span class="s-vote-chip">awaiting</span>`;
     }
 
     function teamSection(title, view, detail, voteBy) {
         const rows = !view
-            ? `<div class="s-detail-note">This team no longer exists (merged).</div>`
+            ? `<div class="s-detail-note">This team no longer exists (it joined another).</div>`
             : (view.members || []).map(m => `
                 <div class="s-detail-member">
                   <span class="s-detail-name">${escapeHtml(m.name || m.student_id)}
@@ -504,8 +512,8 @@
     }
 
     function renderDetails(detail, myView, otherView) {
-        const p = detail.proposal;
-        const voteBy = new Map((detail.votes || []).map(v => [v.student_id, v]));
+        const p = detail.request;
+        const voteBy = new Map((detail.responses || []).map(v => [v.student_id, v]));
         const senderName = voteBy.get(p.initiator_id)?.name || p.initiator_id;
         // Named *Label to avoid shadowing the otherTeamName(p) helper above.
         const otherTeamLabel = otherView?.team?.team_name || 'Their team';
@@ -516,9 +524,9 @@
         const overMax  = maxSize !== null && combined > maxSize;
 
         const isOpen = p.state === 'open';
-        // Only unanimous consent merges: at expires_at the proposal lapses, so
-        // silence declines it. Say which way the deadline cuts.
-        const myVote = (detail.votes || []).find(v => v.student_id === myStudentId)?.vote;
+        // Only unanimous acceptance joins the teams: at expires_at the request
+        // lapses, so silence declines it. Say which way the deadline cuts.
+        const myVote = (detail.responses || []).find(v => v.student_id === myStudentId)?.response;
         let timing = '';
         if (isOpen && p.expires_at) {
             const hrs = Math.round((Date.parse(p.expires_at) - Date.now()) / 3600000);
@@ -530,10 +538,14 @@
         } else if (!isOpen) {
             const when = p.resolved_at ? new Date(p.resolved_at).toLocaleString('en-AU') : '';
             const label = p.state === 'auto_cancelled'
-                ? `cancelled — ${cancelledReason(p)}`
+                ? `withdrawn — ${cancelledReason(p)}`
                 : p.state === 'expired'
                     ? 'expired because not everyone responded in time'
-                    : p.state.replace('_', ' ');
+                    : p.state === 'approved' ? 'accepted by everyone'
+                    : p.state === 'rejected' ? 'declined'
+                    : p.state === 'invalidated'
+                        ? `no longer valid${p.invalidated_reason ? ' — ' + p.invalidated_reason : ''}`
+                        : p.state.replace('_', ' ');
             timing = ` · ${label}${when ? ' ' + when : ''}`;
         }
         const sizeText = maxSize !== null ? `Combined size: ${combined} / ${maxSize}` : `Combined size: ${combined}`;
@@ -542,19 +554,19 @@
         const commitment = commitmentView(p.initiator_id, myVote);
 
         // Competing acceptances: only one of them can ever take effect.
-        const others = isOpen ? outstandingCommitments(p.proposal_id) : [];
+        const others = isOpen ? outstandingCommitments(p.request_id) : [];
         const raceWarning = !others.length ? '' : `
           <div class="s-details-warning">
-            ${myVote === 'yes'
+            ${myVote === 'accept'
               ? `⚠ You've also committed to ${escapeHtml(commitmentList(others))}. Whichever team
-                 finishes voting first is the one you'll join — the other will be cancelled.`
+                 finishes accepting first is the one you'll join — the other will be withdrawn.`
               : `⚠ You've already committed to ${escapeHtml(commitmentList(others))}. Accepting this one
-                 too means whichever team finishes voting first is the one you'll join.`}
+                 too means whichever team finishes accepting first is the one you'll join.`}
           </div>`;
 
         return `
           <div class="s-details-title">Request from ${escapeHtml(senderName)}</div>
-          <div class="s-details-sub">${escapeHtml(otherTeamLabel)} wants to merge with your ${escapeHtml(myTeamLabel)}.</div>
+          <div class="s-details-sub">${escapeHtml(otherTeamLabel)} wants to team up with your ${escapeHtml(myTeamLabel)}.</div>
           <div class="s-details-meta${overMax ? ' warn' : ''}">
             ${escapeHtml(sizeText)}${overMax ? ' — over the maximum team size' : ''}${escapeHtml(timing)}
           </div>
@@ -563,25 +575,25 @@
           ${teamSection('Your team', myView, detail, voteBy)}
           <div class="t-modal-actions">
             ${!isOpen ? `
-              <button class="btn-decline" onclick="dismissFromDetails('${p.proposal_id}')">Dismiss</button>
+              <button class="btn-decline" onclick="dismissFromDetails('${p.request_id}')">Dismiss</button>
             ` : commitment.committed ? `
-              <button class="btn-decline" onclick="voteFromDetails('${p.proposal_id}','no')">${commitment.actionLabel}</button>
+              <button class="btn-decline" onclick="respondFromDetails('${p.request_id}','decline')">${commitment.actionLabel}</button>
             ` : `
-              <button class="btn-accept"  onclick="voteFromDetails('${p.proposal_id}','yes')">Yes</button>
-              <button class="btn-decline" onclick="voteFromDetails('${p.proposal_id}','no')">No</button>
+              <button class="btn-accept"  onclick="respondFromDetails('${p.request_id}','accept')">Accept</button>
+              <button class="btn-decline" onclick="respondFromDetails('${p.request_id}','decline')">Decline</button>
             `}
             <button class="t-modal-cancel" onclick="closeDetails()">Close</button>
           </div>`;
     }
 
-    async function voteFromDetails(proposalId, vote) {
+    async function respondFromDetails(requestId, response) {
         closeDetails();
-        await castVote(proposalId, vote);
+        await respond(requestId, response);
     }
 
-    async function dismissFromDetails(proposalId) {
+    async function dismissFromDetails(requestId) {
         closeDetails();
-        await dismissProposal(proposalId);
+        await dismissRequest(requestId);
     }
 
     function closeDetails() {

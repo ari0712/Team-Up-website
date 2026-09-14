@@ -14,7 +14,7 @@ module.exports = function createStudentRouter({ studentPortalService }) {
   const send = (res, fn) => {
     try { return fn(); }
     catch (e) {
-      if (e && e.status) return res.status(e.status).json({ error: e.message });
+      if (e && e.status) return res.status(e.status).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
       console.error('Student portal error:', e);
       return res.status(500).json({ error: 'Internal error' });
     }
@@ -46,7 +46,7 @@ module.exports = function createStudentRouter({ studentPortalService }) {
 
   // ── Preferences & tutorial slots ────────────────────────────────
   router.get('/units/:unitId/tutorial-slots', (req, res) =>
-    send(res, () => res.json(svc.getTutorialSlots(req.params.unitId))));
+    send(res, () => res.json(svc.getTutorialSlots(req.params.unitId, sid(req)))));
 
   router.get('/units/:unitId/prefs', (req, res) =>
     send(res, () => res.json(svc.getPrefs(req.params.unitId, sid(req)))));
@@ -86,24 +86,34 @@ module.exports = function createStudentRouter({ studentPortalService }) {
     send(res, () => res.json(svc.getMyTeam(req.params.unitId, sid(req)))));
 
   router.get('/units/:unitId/teams/:teamId', (req, res) =>
-    send(res, () => res.json(svc.getTeamView(req.params.unitId, req.params.teamId))));
+    send(res, () => res.json(svc.getTeamView(req.params.unitId, req.params.teamId, sid(req)))));
 
-  // ── Proposals ───────────────────────────────────────────────────
-  router.post('/units/:unitId/proposals', (req, res) =>
-    send(res, () => res.json(svc.createProposal(req.params.unitId, sid(req), (req.body || {}).targetTeamId))));
+  // "I have no preferred teammates — place me anywhere." A declaration by a
+  // solo student, not a group submission. DELETE withdraws it.
+  router.post('/units/:unitId/no-preference', (req, res) =>
+    send(res, () => res.json(svc.declareNoPreference(req.params.unitId, sid(req)))));
 
-  router.get('/units/:unitId/proposals', (req, res) =>
-    send(res, () => res.json(svc.listProposals(req.params.unitId, sid(req)))));
+  router.delete('/units/:unitId/no-preference', (req, res) =>
+    send(res, () => res.json(svc.withdrawNoPreference(req.params.unitId, sid(req)))));
 
-  router.get('/units/:unitId/proposals/:id', (req, res) =>
-    send(res, () => res.json(svc.getProposalDetail(req.params.unitId, req.params.id, sid(req)))));
+  // ── Team-up requests ────────────────────────────────────────────
+  // Sending one asks another team to join up; every member of both teams then
+  // accepts or declines. Unanimous acceptance is the record — no further step.
+  router.post('/units/:unitId/team-requests', (req, res) =>
+    send(res, () => res.json(svc.sendRequest(req.params.unitId, sid(req), (req.body || {}).targetTeamId))));
 
-  router.patch('/units/:unitId/proposals/:id/vote', (req, res) =>
-    send(res, () => res.json(svc.castVote(req.params.id, sid(req), (req.body || {}).vote))));
+  router.get('/units/:unitId/team-requests', (req, res) =>
+    send(res, () => res.json(svc.listRequests(req.params.unitId, sid(req)))));
 
-  router.patch('/units/:unitId/proposals/:id/seen', (req, res) =>
+  router.get('/units/:unitId/team-requests/:id', (req, res) =>
+    send(res, () => res.json(svc.getRequestDetail(req.params.unitId, req.params.id, sid(req)))));
+
+  router.patch('/units/:unitId/team-requests/:id/respond', (req, res) =>
+    send(res, () => res.json(svc.respondToRequest(req.params.id, sid(req), (req.body || {}).response))));
+
+  router.patch('/units/:unitId/team-requests/:id/seen', (req, res) =>
     send(res, () => {
-      svc.markProposalSeen(req.params.id, sid(req));
+      svc.markRequestSeen(req.params.id, sid(req));
       res.json({ ok: true });
     }));
 
@@ -133,12 +143,6 @@ module.exports = function createStudentRouter({ studentPortalService }) {
   router.delete('/units/:unitId/teams/:teamId/leave', (req, res) =>
     send(res, () => {
       svc.leaveTeam(req.params.unitId, req.params.teamId, sid(req));
-      res.json({ ok: true });
-    }));
-
-  router.post('/units/:unitId/teams/:teamId/submit', (req, res) =>
-    send(res, () => {
-      svc.submitTeam(req.params.unitId, req.params.teamId);
       res.json({ ok: true });
     }));
 

@@ -1,7 +1,10 @@
 const BaseRepository = require('./BaseRepository');
 
+// users.student_id (the n-number) is deliberately NOT selected: this row is
+// what /api/auth/me returns to every student page, and nothing on the client
+// needs the number. It is stored for the coordinator's opt-in export only.
 const JOIN = `
-  SELECT u.username, u.password_hash, u.email, u.student_id,
+  SELECT u.username, u.password_hash, u.email,
          s.display_name, s.tutorial_availability, s.major, s.units_passed, s.team_id,
          s.avatar_path
   FROM users u JOIN students s ON u.username = s.username
@@ -14,7 +17,6 @@ class StudentRepository extends BaseRepository {
       username: row.username,
       passwordHash: row.password_hash,
       email: row.email,
-      studentId: row.student_id,
       displayName: row.display_name,
       tutorialAvailability: row.tutorial_availability,
       major: row.major,

@@ -48,6 +48,33 @@ class UnitStudentRepository extends BaseRepository {
     return row?.name || '';
   }
 
+  // The "place me anywhere" declaration. '' withdraws it.
+  setNoPreference(unitId, studentId, at) {
+    this.run(
+      `UPDATE unit_students SET no_preference_at = ? WHERE unit_id = ? AND student_id = ?`,
+      [at || '', unitId, studentId]
+    );
+  }
+
+  getNoPreferenceAt(unitId, studentId) {
+    return this.get(
+      `SELECT no_preference_at FROM unit_students WHERE unit_id = ? AND student_id = ?`,
+      [unitId, studentId]
+    )?.no_preference_at || '';
+  }
+
+  // Called when students land in a group of 2+: a declaration made while alone
+  // no longer describes what they want.
+  clearNoPreferenceForStudents(unitId, studentIds) {
+    if (!studentIds.length) return;
+    const placeholders = studentIds.map(() => '?').join(',');
+    this.run(
+      `UPDATE unit_students SET no_preference_at = ''
+        WHERE unit_id = ? AND student_id IN (${placeholders})`,
+      [unitId, ...studentIds]
+    );
+  }
+
   // Bulk import from a parsed CSV row (idempotent on (unit_id, student_id)).
   upsertImport(unitId, s) {
     this.run(
@@ -73,13 +100,17 @@ class UnitStudentRepository extends BaseRepository {
   // applies text filters in memory.
   //
   // `us.student_id` is the USERNAME — it is the identity key every other query
-  // joins on, so it must keep that meaning. The student number students actually
-  // know themselves by lives in `users.student_id`, exposed here as
-  // `student_number` so the search can match on it too.
+  // joins on, so it must keep that meaning. It is never shown as an identifier.
+  //
+  // `email` is selected so the search can match a full address the caller
+  // already holds. It does NOT reach the caller by default: searchClassmates
+  // strips it from every row except the shared-name case. The student number
+  // (users.student_id) is deliberately not selected here — students cannot see
+  // anyone's number in QUT systems, so it could only ever leak.
   listClassmates(unitId, excludeStudentId) {
     return this.all(
       `SELECT us.student_id, us.name, us.tutorial_time, us.is_new_to_qut,
-              u.student_id AS student_number,
+              LOWER(TRIM(COALESCE(u.email, ''))) AS email,
               sup.tutorial_slots, sup.project_interests, sup.skills, sup.preferred_role,
               (SELECT tm.team_id FROM unit_team_members tm
                  INNER JOIN unit_teams t ON t.team_id = tm.team_id
@@ -103,14 +134,14 @@ class UnitStudentRepository extends BaseRepository {
   // Full class list with each student's progress stages and saved preferences.
   //
   // As in listClassmates, `us.student_id` is the USERNAME — the identity key the
-  // progress and prefs joins rely on. The student number a teacher recognises
-  // comes from the account (`users.student_id`), falling back to whatever the
-  // roster import recorded, and is exposed separately as `student_number`.
+  // progress and prefs joins rely on. Email is the identifier a coordinator
+  // uses; the student number is not carried here — the export's opt-in column
+  // (UnitService.buildExport) is the one sanctioned channel for it.
   listWithProgress(unitId) {
     return this.all(
       `SELECT us.student_id, us.name, us.tutorial_time, us.is_new_to_qut,
-              us.degree, us.major,
-              COALESCE(NULLIF(u.student_id, ''), NULLIF(r.student_number, ''), '') AS student_number,
+              us.degree, us.major, us.no_preference_at,
+              LOWER(TRIM(COALESCE(u.email, ''))) AS email,
               COALESCE(sp.read_rules,          0) AS read_rules,
               COALESCE(sp.entered_preferences, 0) AS entered_preferences,
               COALESCE(sp.in_team,             0) AS in_team,
@@ -121,7 +152,6 @@ class UnitStudentRepository extends BaseRepository {
        LEFT JOIN student_progress sp ON sp.unit_id = us.unit_id AND sp.student_id = us.student_id
        LEFT JOIN student_unit_prefs sup ON sup.unit_id = us.unit_id AND sup.student_id = us.student_id
        LEFT JOIN users u ON u.username = us.student_id
-       LEFT JOIN unit_roster r ON r.unit_id = us.unit_id AND r.email = LOWER(TRIM(u.email))
        WHERE us.unit_id = ?
        ORDER BY us.name ASC`,
       [unitId]

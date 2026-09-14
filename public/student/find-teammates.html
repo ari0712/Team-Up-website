@@ -56,17 +56,17 @@
         <h2 style="font-size:19px;font-weight:800;margin-bottom:6px">Find Teammates</h2>
         <p style="font-size:13px;color:#555;margin-bottom:18px">Search manually or use TeamUp recommendations.</p>
         <div class="s-search-bar">
-            <input id="search" type="text" placeholder="Search by name or student ID…" oninput="filterStudents()">
-            <select id="filter-tutorial" onchange="filterStudents()">
+            <input id="search" type="text" placeholder="Search by name, or a full email address you already have…" oninput="filterStudents()">
+            <select id="filter-tutorial" onchange="applyLocalFilters()">
                 <option value="">Any tutorial</option>
             </select>
-            <select id="filter-interest" onchange="filterStudents()">
+            <select id="filter-interest" onchange="applyLocalFilters()">
                 <option value="">Any interest</option>
                 <option>Web Development</option><option>UX/UI Design</option>
                 <option>Data Analysis</option><option>Cybersecurity</option>
                 <option>AI / Matching Logic</option><option>Business Analysis</option>
             </select>
-            <select id="filter-skill" onchange="filterStudents()">
+            <select id="filter-skill" onchange="applyLocalFilters()">
                 <option value="">Any skill</option>
                 <option>React</option><option>JavaScript</option>
                 <option>Database Design</option><option>Backend Development</option>
@@ -104,11 +104,11 @@
         } catch(e) { console.error('Could not load tutorial slots:', e); }
 
         // Every enrolled student is on a team-of-1, so we don't need to fetch it here.
-        // available=1 hides students whose team has been submitted for teacher
-        // approval (or already approved) — they cannot be merged with, so
-        // offering them here would only produce a failed proposal.
-        // Merge requests are refused once the deadline passes, so disable them
-        // here rather than letting every click come back 403.
+        // available=1 hides students whose team the coordinator has finalised —
+        // they cannot be asked to team up, so offering them here would only
+        // produce a refused request.
+        // Requests are refused once the deadline passes, so disable them here
+        // rather than letting every click come back 403.
         try {
             const unit = await get(`/api/student/units/${unitId}`);
             locked = isUnitLocked(unit);
@@ -132,18 +132,33 @@
         if (!locked && new URLSearchParams(location.search).get('automatch')) autoMatch();
     })();
 
+    // The name box is matched on the SERVER, not here: it forgives misspellings,
+    // matches a full email exactly, and decides which rows may carry an email
+    // (only where two students share a name). Debounced, because every query
+    // counts against a per-student rate limit — a name typed in one go is one
+    // or two requests, not one per keystroke.
+    let searchTimer = null, lastQuery = '';
     function filterStudents() {
-        const search   = document.getElementById('search').value.toLowerCase();
+        const query = document.getElementById('search').value.trim();
+        clearTimeout(searchTimer);
+        if (query === lastQuery) { applyLocalFilters(); return; }
+        searchTimer = setTimeout(async () => {
+            lastQuery = query;
+            try {
+                allStudents = await get(`/api/student/units/${unitId}/students?available=1&search=${encodeURIComponent(query)}`);
+                applyLocalFilters();
+            } catch (e) {
+                document.getElementById('student-list').innerHTML =
+                    `<p style="color:#e94560">${esc(e.message)}</p>`;
+            }
+        }, 600);
+    }
+
+    function applyLocalFilters() {
         const tutorial = document.getElementById('filter-tutorial').value;
         const interest = document.getElementById('filter-interest').value;
         const skill    = document.getElementById('filter-skill').value;
         let filtered = allStudents;
-        // student_number is the n-number; student_id is the username. The box
-        // offers both, so both are matched.
-        if (search)   filtered = filtered.filter(s =>
-            (s.name || '').toLowerCase().includes(search) ||
-            (s.student_id || '').toLowerCase().includes(search) ||
-            (s.student_number || '').toLowerCase().includes(search));
         if (tutorial) filtered = filtered.filter(s => (s.tutorial_slots || s.tutorial_time || '').includes(tutorial));
         if (interest) filtered = filtered.filter(s => (s.project_interests || '').includes(interest));
         if (skill)    filtered = filtered.filter(s => (s.skills || '').includes(skill));
@@ -157,16 +172,16 @@
             const skills  = (s.skills || '').split(',').filter(Boolean);
             const interests = (s.project_interests || '').split(',').filter(Boolean);
             const tutorial = s.tutorial_slots || s.tutorial_time || '';
-            // Confirms a student-ID search actually landed on the right person.
-            // Falls back to the username when the account has no n-number, and
-            // is dropped when it would just repeat the heading.
-            const heading = s.name || s.student_id;
-            const idLabel = s.student_number || s.student_id || '';
+            // The email line exists only when the server attached one — two
+            // students in this result share a name, and it is what tells them
+            // apart. No other identifier is shown: students cannot see student
+            // numbers or logins anywhere in QUT systems.
+            const heading = s.name || 'Student';
             return `
       <div class="s-teammate-card">
         <div class="s-teammate-info">
-          <h3>${esc(heading)}${idLabel && idLabel !== heading
-              ? `<span class="s-teammate-id"> – Student ID: ${esc(idLabel)}</span>` : ''}</h3>
+          <h3>${esc(heading)}</h3>
+          ${s.email ? `<p class="s-teammate-id">${esc(s.email)} <span style="color:#999">· same name as another student</span></p>` : ''}
           <p>${s.preferred_role || 'Role not set'}</p>
           <div class="s-match-reasons" style="margin-top:8px">
             ${tutorial ? `<span>⭐ Tutorial: ${tutorial.split(',')[0]}</span>` : ''}
@@ -180,7 +195,7 @@
                 ? `<button class="t-open-btn" style="width:140px;background:#aaa;cursor:not-allowed" disabled
                      title="The deadline has passed">Formation closed</button>`
                 : s.team_id
-                ? `<button class="t-open-btn" style="width:140px" onclick="proposeMerge('${s.team_id}')">Propose Merge</button>`
+                ? `<button class="t-open-btn" style="width:140px" onclick="askToTeamUp('${s.team_id}')">Ask to team up</button>`
                 : `<button class="t-open-btn" style="width:140px;background:#aaa;cursor:not-allowed" disabled>No team yet</button>`
             }
           </div>
@@ -192,7 +207,7 @@
     const esc = v => String(v ?? '').replace(/[&<>"']/g, c =>
         ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[c]));
 
-    // Ranked merge suggestions. The server does the ranking with the same scorer
+    // Ranked team-up suggestions. The server does the ranking with the same scorer
     // the teacher matcher uses; this only renders it. Sending stays a deliberate
     // click — Auto-Match never proposes on the student's behalf.
     async function autoMatch() {
@@ -222,13 +237,13 @@
                 <div class="am-rank">${i + 1}${i === 0 ? ' · best fit' : ''}</div>
                 <div class="am-names">${esc(s.members.map(m => m.name || m.student_id).join(', '))}
                   <span class="am-badge ${s.sizeValid ? 'am-badge-fit' : 'am-badge-part'}">
-                    ${s.sizeValid ? 'complete team' : 'partial'}</span>
+                    ${s.sizeValid ? 'complete team' : `${s.combinedSize} of target`}</span>
                 </div>
                 <ul class="am-why">${s.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
               </div>
               <div>
                 <button class="t-open-btn" style="width:150px"
-                        onclick="proposeMerge('${esc(s.team_id)}')">Send request</button>
+                        onclick="askToTeamUp('${esc(s.team_id)}')">Ask to team up</button>
               </div>
             </div>`).join('');
 
@@ -244,14 +259,16 @@
             </div>`;
     }
 
-    async function proposeMerge(targetTeamId) {
+    // The rules are checked the moment you ask: a request that would break one
+    // is refused here with the rule named, not discovered later.
+    async function askToTeamUp(targetTeamId) {
         try {
-            const r = await post(`/api/student/units/${unitId}/proposals`, { targetTeamId });
+            const r = await post(`/api/student/units/${unitId}/team-requests`, { targetTeamId });
             if (r.state === 'approved') {
-                alert('Merge approved! Your teams are now combined.');
+                alert('You are now one group.');
                 window.location = `/student/my-team.html?unitId=${unitId}`;
             } else {
-                alert('Merge proposal sent. Awaiting votes from both teams.');
+                alert('Request sent. Everyone on both teams needs to accept it.');
             }
         } catch(e) { alert(e.message); }
     }

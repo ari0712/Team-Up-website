@@ -26,7 +26,7 @@
 
 const ServiceError = require('./ServiceError');
 const { isDeliverable } = require('./email/transport');
-const { validateTeam } = require('../utils/teamValidator');
+const { placementOf } = require('../utils/placement');
 const { SEVERITIES } = require('../repositories/notificationPrefsRepository');
 
 function nowIso() { return new Date().toISOString(); }
@@ -73,31 +73,18 @@ function deadlineBucket(deadline, audience) {
 // A passed deadline is the only thing either audience must not miss.
 const deadlineSeverity = bucket => (bucket === 'due' ? 'CRITICAL' : 'WARNING');
 
-// ── "Needs attention" signals ────────────────────────────────────────────────
-// These deliberately mirror the SIGNALS list the Export page renders
-// (public/teacher/export.html), so the notification and the exported report
-// can never disagree about who is at risk. Ordered most urgent first; a
-// student takes the status of their first match and is reported once.
+// ── "Needs attention" ─────────────────────────────────────────────────────────
+// Driven by placement (utils/placement.js), the same categorisation the class
+// list and the export use, so the three can never disagree about who is at
+// risk. Exactly one thing needs the coordinator's attention:
 //
-// If you add a signal, add it in BOTH places — the export list is client-side
-// and cannot require this module.
-const ATTENTION_SIGNALS = [
-  {
-    key: 'alone', severity: 'CRITICAL', label: 'alone in a team',
-    // sizeValid guards against crying wolf where a one-person team is a legal
-    // size for the unit — it is the server's own team rule, via teamValidator.
-    test: c => c.team && c.team.status === 'FORMING'
-               && c.teamSize === 1 && !c.sizeValid
-  },
-  {
-    key: 'no_prefs', severity: 'WARNING', label: 'no preferences entered',
-    test: c => c.student.entered_preferences != 1
-  }
-];
-
-// Longest name list worth putting in a notification body; beyond this the
-// count carries the message and the class list carries the detail.
-const ATTENTION_NAME_LIMIT = 5;
+//   SILENT   alone and nothing recorded — chase these.
+//
+// GROUPED students recorded themselves (an accepted team-up request is the
+// record); DECLARED students asked to be placed anywhere. Neither is chased.
+//
+// Volume is bounded per unit whatever the class size: SILENT students are one
+// summary line, and the class list, pre-filtered, carries the names.
 
 // At-risk reporting stays silent until the deadline is close enough that the
 // teacher wants to know. How close is per-unit (`units.at_risk_days`), chosen
@@ -125,8 +112,6 @@ function daysUntilDeadline(deadline) {
   const ms = Date.parse(deadline) - Date.now();
   return isNaN(ms) ? null : ms / 86400000;
 }
-
-const displayName = s => (s.name && String(s.name).trim()) || s.student_id;
 
 class NotificationService {
   constructor({ db, notifications, prefs, outbox, units, enrollment, teams, announcements,
@@ -199,10 +184,11 @@ class NotificationService {
       }
     }
 
-    // ── Team requests (merge proposals) ──
+    // ── Team-up requests ──
     // One query for the whole unit rather than N per-student calls.
     const proposalRows = this.db.all(
       `SELECT p.proposal_id, p.state, p.initiator_id, p.created_at, p.resolved_at,
+              p.invalidated_reason,
               ts.team_name AS source_team_name, tt.team_name AS target_team_name,
               pv.student_id, pv.vote
          FROM proposals p
@@ -218,8 +204,8 @@ class NotificationService {
         if (r.vote === 'pending' && r.student_id !== r.initiator_id) {
           add(r.student_id, {
             type: 'team_request',
-            title: 'New team request',
-            body: `${otherTeam} wants to merge with your team. Accept or decline before it expires.`,
+            title: 'New team-up request',
+            body: `${otherTeam} wants to team up with your group. Accept or decline before it expires.`,
             link: link('dashboard'),
             dedupeKey: `proposal:${r.proposal_id}:open`,
             createdAt: r.created_at || now
@@ -228,11 +214,13 @@ class NotificationService {
         continue;
       }
       const resolved = {
-        approved:       ['Teams merged', 'A team request was accepted by everyone — your team has been merged.'],
-        rejected:       ['Team request declined', 'A team request was declined.'],
-        expired:        ['Team request expired', 'A team request expired because not everyone responded in time.'],
-        auto_cancelled: ['Team request cancelled', 'A team request was cancelled because another merge completed first.'],
-        invalidated:    ['Team request no longer valid', 'A team request is no longer valid because a team changed.']
+        approved:       ['Request accepted — you\'re now one group', 'Everyone accepted a team-up request. Your group is recorded; nothing more to do.'],
+        rejected:       ['Request declined', 'A team-up request was declined.'],
+        expired:        ['Request expired', 'A team-up request expired because not everyone responded in time.'],
+        auto_cancelled: ['Request withdrawn', 'A team-up request was withdrawn because another team-up completed first.'],
+        invalidated:    ['Request no longer valid',
+                         r.invalidated_reason ? `A team-up request can no longer go ahead: ${r.invalidated_reason}.`
+                                              : 'A team-up request can no longer go ahead because a team changed.']
       }[r.state];
       if (!resolved) continue;
       add(r.student_id, {
@@ -245,31 +233,27 @@ class NotificationService {
       });
     }
 
-    // ── Team status ──
+    // ── Coordinator overrides ──
+    // The only team-status events a student can receive: the coordinator
+    // finalised their team, or reopened it. Keyed on the stamps, so a team
+    // finalised, reopened and finalised again notifies each time.
     for (const t of this.teams.listAllWithCounts(unitId)) {
       const members = this.teams.getMembers(t.team_id).map(m => m.student_id);
-      const emit = (key, title, body, severity = 'INFO') => members.forEach(sid =>
+      const emit = (key, title, body, severity, at) => members.forEach(sid =>
         add(sid, { type: 'team_status', severity, title, body, link: link('my-team'),
-                   dedupeKey: key,
-                   createdAt: t.submitted_at || t.last_rejected_at || now }));
+                   dedupeKey: key, createdAt: at || now }));
 
-      if (t.status === 'SUBMITTED') {
-        emit(`team:${t.team_id}:SUBMITTED:${t.submitted_at || ''}`,
-             'Team submitted',
-             `${t.team_name} was submitted for teacher review.`);
-      } else if (t.status === 'APPROVED') {
-        emit(`team:${t.team_id}:APPROVED:${t.submitted_at || ''}`,
-             'Team approved',
-             `${t.team_name} was approved by your teacher.`);
+      if (t.status === 'FINALISED' && t.finalised_at) {
+        emit(`team:${t.team_id}:FINALISED:${t.finalised_at}`,
+             'Your team has been finalised',
+             `${t.team_name} has been finalised by your coordinator. Membership can no longer change.`,
+             'INFO', t.finalised_at);
       }
-      // A rejected team goes back to FORMING, so this is checked independently
-      // of status and keyed on the rejection time — a re-submit notifies again.
-      // WARNING because it is the one team_status the students must act on.
-      if (t.last_rejected_at) {
-        emit(`team:${t.team_id}:REJECTED:${t.last_rejected_at}`,
-             'Team submission rejected',
-             `${t.team_name} was sent back by your teacher. Review it and re-submit.`,
-             'WARNING');
+      if (t.status === 'OPEN' && t.reopened_at) {
+        emit(`team:${t.team_id}:REOPENED:${t.reopened_at}`,
+             'Your coordinator reopened your team',
+             `${t.team_name} was reopened by your coordinator. Check My Team for what changed.`,
+             'WARNING', t.reopened_at);
       }
     }
 
@@ -327,40 +311,14 @@ class NotificationService {
     const allTeams = this.teams.listAllWithCounts(unitId);
     const students = this.enrollment.listWithProgress(unitId);
 
-    // ── Students needing attention ──
-    // Evaluated once here and used by two rules below: the immediate per-student
-    // alert and the periodic summary.
-    const teamOf = new Map();
-    for (const t of allTeams) {
-      const members = this.teams.getMembers(t.team_id);
-      const accepted = members.filter(m => m.status === 'ACCEPTED');
-      const sizeValid = validateTeam(members, unit, { includeAllAccepted: true }).sizeValid;
-      for (const m of members) {
-        teamOf.set(m.student_id, { team: t, teamSize: accepted.length, sizeValid });
-      }
-    }
-
-    const flagged = [];
-    for (const student of students) {
-      const ctx = { student, ...(teamOf.get(student.student_id) || { team: null, teamSize: 0, sizeValid: false }) };
-      const hit = ATTENTION_SIGNALS.find(s => s.test(ctx));
-      if (hit) flagged.push({ student, signal: hit });
-    }
-
-    // ── Teams waiting on review ──
-    // Keyed on submitted_at so a team that is sent back and re-submitted
-    // notifies again, mirroring the student-side rejection rule.
-    for (const t of allTeams) {
-      if (t.status !== 'SUBMITTED') continue;
-      add({
-        type: 'review_pending', severity: 'WARNING',
-        title: 'Team awaiting review',
-        body: `${t.team_name} was submitted and is waiting for your approval.`,
-        link: link('team-formation'),
-        dedupeKey: `teacher:team:${t.team_id}:SUBMITTED:${t.submitted_at || ''}`,
-        createdAt: t.submitted_at || now
-      });
-    }
+    // ── Placement, once for the unit ──
+    const teamOf = new Map(
+      this.teams.listMembershipsWithSizes(unitId).map(m => [m.student_id, m]));
+    const placementOfStudent = s => {
+      const t = teamOf.get(s.student_id);
+      return placementOf({ acceptedCount: t?.accepted_count || 0, noPreferenceAt: s.no_preference_at });
+    };
+    const silentCount = students.filter(s => placementOfStudent(s) === 'SILENT').length;
 
     // ── Deadline approaching ──
     const bucket = deadlineBucket(unit.deadline, 'TEACHER');
@@ -383,65 +341,34 @@ class NotificationService {
       const atRiskDays = atRiskDaysFor(unit);
       const daysLeft   = daysUntilDeadline(unit.deadline);
       if (atRiskDays > 0 && daysLeft !== null && daysLeft <= atRiskDays) {
-        const unformed = students.filter(s => !s.in_team).length;
-        if (unformed > 0) {
+        // ── Silent students: ONE line, keyed on the deadline bucket so it
+        //    re-states the count as the deadline closes in and never per student.
+        //    The class list, pre-filtered, carries the names.
+        if (silentCount > 0) {
           add({
-            type: 'unformed', severity: 'WARNING',
-            title: `${unformed} student${unformed === 1 ? '' : 's'} without a team`,
-            body: `${unformed} of ${students.length} student${students.length === 1 ? '' : 's'} `
-                + `still ${unformed === 1 ? 'has' : 'have'} no team as the deadline approaches.`,
-            link: link('class-list'),
-            dedupeKey: `teacher:unformed:${unitId}:${bucket[0]}`
+            type: 'needs_attention', severity: 'CRITICAL',
+            title: `${silentCount} student${silentCount === 1 ? '' : 's'} with nothing recorded`,
+            body: `${silentCount} student${silentCount === 1 ? ' has' : 's have'} no team and `
+                + `${silentCount === 1 ? "hasn't" : "haven't"} asked to be placed. `
+                + `These are the ones to chase.`,
+            link: link('class-list') + '&placement=SILENT',
+            dedupeKey: `teacher:attention:${unitId}:silent:${bucket[0]}`
           });
         }
 
-        // A student stranded alone in an undersized team, named individually.
-        // The dedupe key carries no bucket, so this stays one notification per
-        // student for the life of the unit — crossing into a nearer bucket
-        // re-states the summary below, but never re-reports the same student.
-        for (const { student, signal } of flagged) {
-          if (signal.key !== 'alone') continue;
-          add({
-            type: 'needs_attention', severity: signal.severity,
-            title: `${displayName(student)} is alone in a team`,
-            body: `${displayName(student)} is the only accepted member of `
-                + `${teamOf.get(student.student_id)?.team?.team_name || 'their team'}, `
-                + `which is not a valid size for this unit.`,
-            link: link('team-formation'),
-            dedupeKey: `teacher:attention:${unitId}:${student.student_id}:alone`
-          });
-        }
-
-        // Summary of everyone currently flagged. Keyed on the deadline bucket
-        // rather than the count, so it re-states the position as the deadline
-        // closes in instead of firing every time one student changes.
-        if (flagged.length) {
-          const worst = flagged.some(f => f.signal.severity === 'CRITICAL')
-            ? 'CRITICAL' : 'WARNING';
-          const named = flagged.slice(0, ATTENTION_NAME_LIMIT)
-            .map(f => `${displayName(f.student)} (${f.signal.label})`)
-            .join(', ');
-          const rest = flagged.length - Math.min(flagged.length, ATTENTION_NAME_LIMIT);
-
-          add({
-            type: 'needs_attention', severity: worst,
-            title: `${flagged.length} student${flagged.length === 1 ? '' : 's'} need`
-                 + `${flagged.length === 1 ? 's' : ''} attention`,
-            body: `${named}${rest > 0 ? `, and ${rest} more` : ''}.`,
-            link: link('export'),
-            dedupeKey: `teacher:attention:${unitId}:summary:${bucket[0]}`
-          });
-        }
       }
     }
 
-    // ── Formation complete ──
-    // Not keyed on a timestamp: this is a one-shot "you're done" for the unit.
-    if (allTeams.length && allTeams.every(t => t.status === 'APPROVED')) {
+    // ── Allocation complete ──
+    // Every enrolled student sits in a finalised team. Not keyed on a
+    // timestamp: a one-shot "you're done" for the unit.
+    const allFinalised = students.length > 0 &&
+      students.every(s => teamOf.get(s.student_id)?.status === 'FINALISED');
+    if (allFinalised) {
       add({
         type: 'complete', severity: 'INFO',
-        title: 'All teams approved',
-        body: `Every team in ${unit.unit_name || unitId} has been approved. Team formation is complete.`,
+        title: 'Every student is in a finalised team',
+        body: `Every student in ${unit.unit_name || unitId} is in a finalised team. Allocation is complete.`,
         link: link('team-formation'),
         dedupeKey: `teacher:complete:${unitId}`
       });

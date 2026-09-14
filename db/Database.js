@@ -28,10 +28,10 @@ class Database {
 
     if (fs.existsSync(this.filePath)) {
       this.raw = new SQL.Database(fs.readFileSync(this.filePath));
-      console.log('Loaded existing teamup.db');
+      console.log('Loaded existing database');
     } else {
       this.raw = new SQL.Database();
-      console.log('Created new teamup.db');
+      console.log('Created new database');
     }
 
     new SchemaMigrator(this.raw).migrate();

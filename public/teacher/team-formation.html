@@ -40,6 +40,12 @@
         }
         .tf-dot-green { background: #22c55e; }
         .tf-dot-red   { background: #e94560; }
+        .tf-dot-amber { background: #f5a623; }
+        .tf-org-team.seed { border-color: #2663ff; }
+        .tf-org-lock { font-size: 10px; font-weight: 700; color: #2663ff; background: #eff4ff;
+                       padding: 1px 6px; border-radius: 20px; margin-left: 4px; white-space: nowrap; }
+        .tf-org-dissolved { background: #fff8e6; border: 1.5px solid #f0d9a0; border-radius: 10px;
+                            padding: 10px 14px; font-size: 12px; color: #6b5a2e; margin: 10px 0; }
         .tf-view-btn {
             display: block;
             width: 100%;
@@ -64,10 +70,17 @@
             margin-left: 8px;
             vertical-align: middle;
         }
-        .tf-status-forming    { background: #fff3cd; color: #856404; }
-        .tf-status-submitted  { background: #cfe2ff; color: #0c447c; }
-        .tf-status-approved   { background: #d1e7dd; color: #0a3622; }
-        .tf-status-rejected   { background: #f8d7da; color: #58151c; }
+        .tf-status-open       { background: #cfe2ff; color: #0c447c; }
+        .tf-status-finalised  { background: #d1e7dd; color: #0a3622; }
+        .tf-batches { margin-top: 14px; font-size: 12px; color: #555; }
+        .tf-batch { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+                    padding: 6px 0; border-bottom: 1px solid #eef3f8; }
+        .tf-batch button { font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1.5px solid #e94560;
+                           background: #fff; color: #e94560; cursor: pointer; }
+        .tf-batch button:disabled { opacity: .5; cursor: not-allowed; }
+        .tf-confirm { background: #fff8e6; border: 1.5px solid #f0d9a0; border-radius: 12px; padding: 14px 18px; margin-top: 12px; }
+        .tf-confirm h4 { font-size: 14px; font-weight: 800; color: #8a6100; margin: 0 0 6px; }
+        .tf-confirm p { font-size: 13px; color: #6b5a2e; margin: 0 0 10px; }
         .tf-pagination {
             display: flex;
             justify-content: center;
@@ -170,10 +183,8 @@
         .tf-tab-label { font-size: 14px; font-weight: 800; color: #1a2a4a; margin-bottom: 4px; }
         .tf-tab-count { font-size: 13px; color: #666; font-weight: 600; }
         .tf-tab-count strong { font-size: 18px; color: #1a2a4a; }
-        .tf-tab.tf-tab-submitted { border-left-color: #2663ff; }
-        .tf-tab.tf-tab-forming   { border-left-color: #f5a623; }
-        .tf-tab.tf-tab-approved  { border-left-color: #22c55e; }
-        .tf-tab.tf-tab-rejected  { border-left-color: #e94560; }
+        .tf-tab.tf-tab-open      { border-left-color: #2663ff; }
+        .tf-tab.tf-tab-finalised { border-left-color: #22c55e; }
         .tf-tab.active { background: #1a2a4a; }
         .tf-tab.active .tf-tab-label,
         .tf-tab.active .tf-tab-count,
@@ -255,8 +266,7 @@
     <aside class="t-progress-aside">
         <h2 class="t-progress-heading">Summary</h2>
         <div id="summary-rows" class="t-progress-rows"></div>
-        <button id="approveAllBtn" class="t-view-progress-btn" style="display:none;margin-top:14px"
-                onclick="approveAllSubmitted()">Approve All Submitted</button>
+        <div id="batches" class="tf-batches"></div>
     </aside>
 </div>
 
@@ -273,14 +283,15 @@
     const params = new URLSearchParams(location.search);
     const unitId = params.get('unitId');
     let allTeams = [];
-    let activeStatus = 'SUBMITTED';
+    let activeStatus = 'OPEN';
 
+    // Two statuses, from the coordinator's point of view. Nothing here waits
+    // on approval: an accepted team-up request is the record.
     const STATUS_GROUPS = [
-        { key: 'SUBMITTED', label: 'Submitted', cls: 'tf-tab-submitted', hideWhenEmpty: false },
-        { key: 'FORMING',   label: 'Forming',   cls: 'tf-tab-forming',   hideWhenEmpty: false },
-        { key: 'APPROVED',  label: 'Approved',  cls: 'tf-tab-approved',  hideWhenEmpty: false },
-        { key: 'REJECTED',  label: 'Rejected',  cls: 'tf-tab-rejected',  hideWhenEmpty: true  },
+        { key: 'OPEN',      label: 'Open',      cls: 'tf-tab-open',      hideWhenEmpty: false },
+        { key: 'FINALISED', label: 'Finalised', cls: 'tf-tab-finalised', hideWhenEmpty: false },
     ];
+    const STATUS_LABEL = { OPEN: 'Open', FINALISED: 'Finalised' };
 
     (async () => {
         const user = await requireSession('TEACHER');
@@ -288,7 +299,10 @@
         document.getElementById('teacherName').textContent = user.username;
         if (!unitId) { window.location = '/teacher/home.html'; return; }
         buildTeacherSidebar('team-formation');
-        await Promise.all([loadTeams(), loadLockPanel()]);
+        // Unit first: the team cards word their size against the unit's target.
+        await loadLockPanel();
+        await loadTeams();
+        await loadBatches();
     })();
 
     // ── Deadline lock + organiser ────────────────────────────────────────
@@ -331,8 +345,8 @@
         el.innerHTML = `
             <h3>🔒 Team formation is closed</h3>
             <p>The deadline passed on <strong>${esc(when)}</strong>. Students can no longer send or accept
-               merge requests, leave a team, or submit for approval — you organise the remaining teams from
-               here. To reopen, push the deadline out on the
+               team-up requests, or leave a team — you finalise the remaining teams from here. To reopen,
+               push the deadline out on the
                <a href="/teacher/dashboard.html?unitId=${encodeURIComponent(unitId)}">dashboard</a>.</p>
             <div class="tf-lock-actions">
                 <button class="tf-btn" onclick="generateSuggestions()">Generate suggestions</button>
@@ -359,7 +373,9 @@
         try {
             const s = requireSuggestions(await get(`/api/units/${unitId}/suggestions`));
             draft = {
-                teams: s.teams.map(t => ({ members: t.members, reasons: t.reasons })),
+                teams: s.teams.map(t => ({ members: t.members, reasons: t.reasons,
+                                           seed: t.seed_team_name || null,
+                                           locked: new Set(t.locked_member_ids || []) })),
                 unassigned: s.unassigned,
                 meta: s,
             };
@@ -376,8 +392,15 @@
         org.innerHTML = '<p class="t-empty">Loading students…</p>';
         try {
             const s = requireSuggestions(await get(`/api/units/${unitId}/suggestions`));
-            const everyone = [...s.teams.flatMap(t => t.members), ...s.unassigned];
-            draft = { teams: [], unassigned: everyone, meta: s };
+            // Protected groups start as their own teams even in manual mode —
+            // the server refuses to split them, so the editor must not offer to.
+            const seeds = s.teams.filter(t => t.seed_team_id).map(t => ({
+                members: t.members.filter(m => t.locked_member_ids.includes(m.student_id)),
+                reasons: [], seed: t.seed_team_name, locked: new Set(t.locked_member_ids) }));
+            const lockedIds = new Set(seeds.flatMap(t => [...t.locked]));
+            const everyone = [...s.teams.flatMap(t => t.members), ...s.unassigned]
+                .filter(m => !lockedIds.has(m.student_id));
+            draft = { teams: seeds, unassigned: everyone, meta: s };
             renderOrganiser('Manual grouping');
         } catch (e) {
             org.innerHTML = `<p class="t-empty">Could not load: ${esc(e.message)}</p>`;
@@ -388,6 +411,7 @@
         const sizes = String(draft.meta.valid_team_sizes || '4').split(',')
             .map(n => parseInt(n)).filter(Boolean);
         const sizeOk = sizes.includes(members.length);
+        const overMax = members.length > Math.max(...sizes);
         const slotSets = members.map(m => new Set(
             String(m.tutorial_slots || '').split(',').map(x => x.trim()).filter(Boolean)));
         const shared = slotSets.length
@@ -395,8 +419,11 @@
         const roles = members.map(m => m.preferred_role).filter(Boolean);
         const dup = roles.length !== new Set(roles).size;
         const newCount = members.filter(m => m.is_new_to_qut).length;
-        return { sizeOk, shared, dup, newCount,
-                 newOk: draft.meta.max_new_to_qut == null || newCount <= draft.meta.max_new_to_qut };
+        const newOk = draft.meta.max_new_to_qut == null || newCount <= draft.meta.max_new_to_qut;
+        // `bad` is a hard rule broken — the server will refuse it. Under target
+        // is not in here: a group of 3 is a legitimate outcome.
+        const bad = overMax || !newOk || (draft.meta.must_share_tutorial && !shared.length);
+        return { sizeOk, overMax, shared, dup, newCount, newOk, bad };
     }
 
     function renderOrganiser(title) {
@@ -410,12 +437,14 @@
 
         const card = (g) => {
             const v = draftValidation(g.members);
-            const bad = !v.sizeOk || !v.newOk || (draft.meta.must_share_tutorial && !v.shared.length);
+            const bad = v.bad;
+            const t = draft.teams[g.idx];
             return `
-            <div class="tf-org-team ${bad ? 'bad' : ''}">
-                <h4>${esc(g.label)} · ${g.members.length} members</h4>
+            <div class="tf-org-team ${bad ? 'bad' : ''} ${t.seed ? 'seed' : ''}">
+                <h4>${esc(g.label)} · ${g.members.length} members${t.seed
+                    ? ` <span class="tf-org-lock">🔒 ${esc(t.seed)}</span>` : ''}</h4>
                 <div class="tf-org-reasons">
-                    <span class="tf-org-flag ${v.sizeOk ? 'ok' : 'warn'}">${v.sizeOk ? '✓' : '!'} size ${g.members.length}</span>
+                    <span class="tf-org-flag ${v.overMax ? 'warn' : 'ok'}">${v.overMax ? '! over max' : v.sizeOk ? '✓' : '·'} size ${g.members.length}${v.sizeOk || v.overMax ? '' : ' of ' + esc(draft.meta.valid_team_sizes || '4')}</span>
                     <span class="tf-org-flag ${v.shared.length ? 'ok' : 'warn'}">${v.shared.length ? '✓ ' + esc(v.shared[0]) : '! no shared tutorial'}</span>
                     <span class="tf-org-flag ${v.dup ? 'warn' : 'ok'}">${v.dup ? '! repeated role' : '✓ distinct roles'}</span>
                     <span class="tf-org-flag ${v.newOk ? 'ok' : 'warn'}">${v.newOk ? '✓' : '!'} ${v.newCount} new-to-QUT</span>
@@ -423,13 +452,21 @@
                 ${g.members.map(m => `
                     <div class="tf-org-member">
                         <span class="tf-org-name">${esc(m.name || m.student_id)}
-                            <span class="tf-org-role">${esc(m.preferred_role || 'no role')}</span></span>
+                            <span class="tf-org-role">${esc(m.preferred_role || 'no role')}</span>${
+                            t.locked?.has(m.student_id) ? '<span class="tf-org-lock" title="Part of a recorded group — moves with it">🔒</span>' : ''}</span>
                         <select class="tf-org-move" onchange="moveStudent('${esc(m.student_id)}', this.value)">
                             ${options(g.idx)}
                         </select>
                     </div>`).join('') || '<p style="font-size:12px;color:#888">Empty</p>'}
             </div>`;
         };
+
+        const dissolved = (draft.meta.dissolved || []);
+        const dissolvedNote = dissolved.length ? `
+            <div class="tf-org-dissolved">
+                <strong>Split because a rule was broken:</strong>
+                ${dissolved.map(d => `<div>${esc(d.team_name)} — ${esc(d.reason)}</div>`).join('')}
+            </div>` : '';
 
         const unassignedCard = `
             <div class="tf-org-team tf-org-unassigned">
@@ -447,46 +484,67 @@
                     </div>`).join('') || '<p style="font-size:12px;color:#888">Nobody</p>'}
             </div>`;
 
-        const anyBad = groups.some(g => {
-            const v = draftValidation(g.members);
-            return !v.sizeOk || !v.newOk || (draft.meta.must_share_tutorial && !v.shared.length);
-        });
+        const anyBad = groups.some(g => draftValidation(g.members).bad);
 
         org.innerHTML = `
             <div class="tf-lock open">
                 <h3>${esc(title)}</h3>
-                <p>Move any student with the dropdown beside their name. Teams marked in amber break one of
-                   this unit's rules — you can still approve them, but they are flagged so the choice is
-                   deliberate. Students left unassigned keep the team they are in now.</p>
+                <p>A suggestion, not an allocation: move any student with the dropdown beside their name, then
+                   finalise. Finalising is reversible — every save is a batch you can revert from the sidebar.
+                   🔒 marks a group the students formed themselves — it moves as one and is never split.
+                   Amber teams break a hard rule and cannot be finalised until fixed; a team under the target
+                   size is fine. Students left unassigned keep the team they are in now.</p>
+                ${dissolvedNote}
                 <div class="tf-org-grid">${groups.map(card).join('')}${unassignedCard}</div>
                 <div class="tf-lock-actions">
-                    <button class="tf-btn go" onclick="applyDraft()" ${groups.length ? '' : 'disabled'}>
-                        Apply &amp; approve ${groups.length} team${groups.length === 1 ? '' : 's'}</button>
+                    <button class="tf-btn go" onclick="confirmFinalise()" ${groups.length && !anyBad ? '' : 'disabled'}>
+                        Finalise ${groups.length} team${groups.length === 1 ? '' : 's'}</button>
                     <button class="tf-btn ghost" onclick="cancelDraft()">Cancel</button>
                 </div>
-                ${anyBad ? '<p style="font-size:12px;color:#8a6100;margin-top:10px">⚠ Some teams break a unit rule.</p>' : ''}
+                <div id="finalise-confirm"></div>
+                ${anyBad ? '<p style="font-size:12px;color:#8a6100;margin-top:10px">⚠ Fix the amber teams first — the server refuses a team that breaks a hard rule.</p>' : ''}
                 <p id="org-msg" style="font-size:13px;font-weight:700;margin-top:8px"></p>
             </div>`;
     }
 
     function moveStudent(studentId, target) {
+        // A member of a recorded group carries the whole group with them: the
+        // server refuses to split one, so the editor never shows a split.
+        const home = draft.teams.find(t => t.locked?.has(studentId));
+        const ids = home ? [...home.locked] : [studentId];
+        const lock = home ? home.locked : null;
+        const seed = home ? home.seed : null;
+        if (home && target === 'un') { alert('A recorded group cannot be left unassigned. Move it to a team instead.'); return; }
+
         // Pull them out of wherever they are.
-        let moved = null;
+        const moved = [];
         draft.unassigned = draft.unassigned.filter(m => {
-            if (m.student_id === studentId) { moved = m; return false; }
+            if (ids.includes(m.student_id)) { moved.push(m); return false; }
             return true;
         });
         draft.teams.forEach(t => {
             t.members = t.members.filter(m => {
-                if (m.student_id === studentId) { moved = m; return false; }
+                if (ids.includes(m.student_id)) { moved.push(m); return false; }
                 return true;
             });
+            if (lock && t.locked === lock) { t.locked = new Set(); t.seed = null; }
         });
-        if (!moved) return;
+        if (!moved.length) return;
 
-        if (target === 'un') draft.unassigned.push(moved);
-        else if (target === 'new') draft.teams.push({ members: [moved], reasons: [] });
-        else draft.teams[parseInt(target)]?.members.push(moved);
+        let dest;
+        if (target === 'un') { draft.unassigned.push(...moved); }
+        else if (target === 'new') { dest = { members: [], reasons: [] }; draft.teams.push(dest); }
+        else dest = draft.teams[parseInt(target)];
+        if (dest) {
+            dest.members.push(...moved);
+            if (lock) {
+                if (dest.locked?.size) {
+                    // Two recorded groups in one team: both stay whole.
+                    dest.locked = new Set([...dest.locked, ...lock]);
+                    dest.seed = `${dest.seed} + ${seed}`;
+                } else { dest.locked = lock; dest.seed = seed; }
+            }
+        }
 
         draft.teams = draft.teams.filter(t => t.members.length);   // drop emptied teams
         renderOrganiser(document.querySelector('#organiser h3').textContent);
@@ -498,20 +556,64 @@
         document.getElementById('organiser').innerHTML = '';
     }
 
-    // Applying always approves. Organising only happens after the deadline, and
-    // once locked a student cannot submit — so a team left FORMING here could
-    // never be finished by anyone. There is deliberately no unapproved path.
-    async function applyDraft() {
+    // Finalising is bulk and terminal for the students, so it asks first — in
+    // the page, stating exactly what will happen, with an explicit click.
+    function confirmFinalise() {
+        const groups = draft.teams.map(t => t.members.map(m => m.student_id)).filter(g => g.length);
+        const students = groups.reduce((n, g) => n + g.length, 0);
+        const unassigned = draft.unassigned.length;
+        document.getElementById('finalise-confirm').innerHTML = `
+            <div class="tf-confirm">
+                <h4>Finalise this grouping?</h4>
+                <p>This will finalise <strong>${groups.length} team${groups.length === 1 ? '' : 's'}</strong> covering
+                   <strong>${students} student${students === 1 ? '' : 's'}</strong>; <strong>${unassigned}</strong>
+                   student${unassigned === 1 ? '' : 's'} stay${unassigned === 1 ? 's' : ''} unassigned and keep${unassigned === 1 ? 's' : ''} their current team.
+                   Rules have been checked. The students will be notified and can no longer change these teams.
+                   You can revert this batch from the sidebar.</p>
+                <div class="tf-lock-actions">
+                    <button class="tf-btn go" onclick="finaliseDraft()">Yes, finalise ${groups.length} team${groups.length === 1 ? '' : 's'}</button>
+                    <button class="tf-btn ghost" onclick="document.getElementById('finalise-confirm').innerHTML=''">Not yet</button>
+                </div>
+            </div>`;
+    }
+
+    async function finaliseDraft() {
         const msg = document.getElementById('org-msg');
         const groups = draft.teams.map(t => t.members.map(m => m.student_id)).filter(g => g.length);
         if (!groups.length) { msg.style.color = '#e94560'; msg.textContent = 'Build at least one team first.'; return; }
         try {
-            const r = await post(`/api/units/${unitId}/apply-teams`, { teams: groups });
-            msg.style.color = '#0a7d0a';
-            msg.textContent = `${r.teams.length} team${r.teams.length === 1 ? '' : 's'} created and approved.`;
+            const r = await post(`/api/units/${unitId}/finalise-teams`, { teams: groups });
             cancelDraft();
             await loadTeams();
-        } catch (e) { msg.style.color = '#e94560'; msg.textContent = e.message; }
+            await loadBatches();
+            document.getElementById('batches').insertAdjacentHTML('afterbegin',
+                `<p style="color:#0a7d0a;font-weight:700;margin:0 0 6px">${r.teams.length} team${r.teams.length === 1 ? '' : 's'} finalised.</p>`);
+        } catch (e) { msg.style.color = '#e94560'; msg.textContent = e.message; document.getElementById('finalise-confirm').innerHTML = ''; }
+    }
+
+    // ── Finalise batches: the way back ──────────────────────────────────
+    async function loadBatches() {
+        const el = document.getElementById('batches');
+        try {
+            const batches = await get(`/api/units/${unitId}/finalise-batches`);
+            if (!batches.length) { el.innerHTML = ''; return; }
+            el.innerHTML = `<div style="font-weight:800;color:#1a2a4a;margin-bottom:4px">Finalise batches</div>` +
+                batches.map(b => `
+                <div class="tf-batch">
+                    <span>${new Date(b.created_at).toLocaleString('en-AU', { day:'numeric', month:'short', hour:'numeric', minute:'2-digit' })}
+                          · ${b.team_count} team${b.team_count === 1 ? '' : 's'}, ${b.student_count} students${b.reverted_at ? ' · reverted' : ''}</span>
+                    <button ${b.reverted_at ? 'disabled' : ''} onclick="revertBatch('${esc(b.batch_id)}', ${b.team_count})">Revert</button>
+                </div>`).join('');
+        } catch (e) { el.innerHTML = `<p style="color:#e94560">${esc(e.message)}</p>`; }
+    }
+
+    async function revertBatch(batchId, teamCount) {
+        if (!confirm(`Revert this batch? The ${teamCount} team${teamCount === 1 ? '' : 's'} it finalised go back to exactly how they were before the save, including any "place me anywhere" declarations.`)) return;
+        try {
+            await post(`/api/units/${unitId}/finalise-batches/${batchId}/revert`, {});
+            await loadTeams();
+            await loadBatches();
+        } catch (e) { alert(e.message); }
     }
 
     function esc(v) {
@@ -587,32 +689,45 @@
             <div class="tf-team-card">
                 <div class="tf-team-id">
                     ${team.team_name || team.team_id.slice(0,8)}
-                    <span class="tf-status-badge ${statusClass}">${team.status}</span>
+                    <span class="tf-status-badge ${statusClass}">${STATUS_LABEL[team.status] || team.status}</span>
                 </div>
                 <div class="tf-val-row">
-                    <div class="tf-dot ${v.sizeValid ? 'tf-dot-green' : 'tf-dot-red'}"></div>
-                    Team has ${team.members.length} student${team.members.length !== 1 ? 's' : ''}
+                    <div class="tf-dot ${sizeDotClass(v)}"></div>
+                    ${sizeText(v, team.members.length)}
                 </div>
                 <div class="tf-val-row">
-                    <div class="tf-dot ${v.tutorialShared ? 'tf-dot-green' : 'tf-dot-red'}"></div>
-                    ${v.tutorialShared
-                        ? `Members share ${v.sharedTutorials[0]}`
+                    <div class="tf-dot ${violates(v, 'NO_SHARED_TUTORIAL') ? 'tf-dot-red' : v.tutorialShared ? 'tf-dot-green' : 'tf-dot-amber'}"></div>
+                    ${v.tutorialRequired === false ? 'Shared tutorial not required'
+                        : v.tutorialShared ? `Members share ${v.sharedTutorials[0]}`
                         : 'No shared tutorial slot'}
                 </div>
                 <div class="tf-val-row">
-                    <div class="tf-dot ${v.newToQutOk ? 'tf-dot-green' : 'tf-dot-red'}"></div>
+                    <div class="tf-dot ${violates(v, 'NEW_TO_QUT_CAP') ? 'tf-dot-red' : 'tf-dot-green'}"></div>
                     New-to-QUT students: ${v.newToQutCount} / ${v.maxNewToQut}
                 </div>
                 <button class="tf-view-btn" onclick="viewTeam('${team.team_id}')">View Team</button>
             </div>`;
     }
 
+    // Size is advisory: under target is amber with the target named, over the
+    // maximum is red. Only a broken hard rule turns a row red.
+    const violates = (v, code) => (v.violations || []).some(x => x.code === code);
+    const targetLabel = () => {
+        const sizes = String(unitInfo?.valid_team_sizes || '4').split(',').map(s => s.trim()).filter(Boolean);
+        return sizes.length > 1 ? `${sizes[0]}–${sizes[sizes.length - 1]}` : sizes[0];
+    };
+    const sizeDotClass = v => v.sizeState === 'COMPLETE' ? 'tf-dot-green'
+        : v.sizeState === 'OVER_MAX' ? 'tf-dot-red' : 'tf-dot-amber';
+    const sizeText = (v, n) => v.sizeState === 'COMPLETE'
+        ? `Team has ${n} student${n !== 1 ? 's' : ''} — complete`
+        : v.sizeState === 'OVER_MAX' ? `Team has ${n} students — over the maximum`
+        : `Group of ${n} — target ${targetLabel()}`;
+
     function renderSummary() {
         const total     = allTeams.length;
-        const submitted = allTeams.filter(t => t.status === 'SUBMITTED').length;
-        const approved  = allTeams.filter(t => t.status === 'APPROVED').length;
-        const forming   = allTeams.filter(t => t.status === 'FORMING').length;
-        document.getElementById('approveAllBtn').style.display = submitted > 0 ? 'block' : 'none';
+        const open      = allTeams.filter(t => t.status === 'OPEN').length;
+        const finalised = allTeams.filter(t => t.status === 'FINALISED').length;
+        const breaching = allTeams.filter(t => t.members.length >= 2 && (t.validation.violations || []).length).length;
         document.getElementById('summary-rows').innerHTML = `
             <div class="t-progress-row">
                 <div class="t-dot t-dot-green"></div>
@@ -620,33 +735,31 @@
                 <span class="t-progress-stat green">${total}</span>
             </div>
             <div class="t-progress-row">
-                <div class="t-dot" style="background:#f5a623"></div>
-                <span class="t-progress-label">Forming</span>
-                <span class="t-progress-stat" style="color:#f5a623">${forming}</span>
-            </div>
-            <div class="t-progress-row">
                 <div class="t-dot" style="background:#2663ff"></div>
-                <span class="t-progress-label">Submitted</span>
-                <span class="t-progress-stat" style="color:#2663ff">${submitted}</span>
+                <span class="t-progress-label">Open</span>
+                <span class="t-progress-stat" style="color:#2663ff">${open}</span>
             </div>
             <div class="t-progress-row">
                 <div class="t-dot t-dot-green"></div>
-                <span class="t-progress-label">Approved</span>
-                <span class="t-progress-stat green">${approved}</span>
-            </div>`;
+                <span class="t-progress-label">Finalised</span>
+                <span class="t-progress-stat green">${finalised}</span>
+            </div>
+            ${breaching ? `
+            <div class="t-progress-row">
+                <div class="t-dot" style="background:#e94560"></div>
+                <span class="t-progress-label">Breaking a rule</span>
+                <span class="t-progress-stat" style="color:#e94560">${breaching}</span>
+            </div>` : ''}`;
     }
 
     function viewTeam(teamId) {
         const team = allTeams.find(t => t.team_id === teamId);
         if (!team) return;
         const v = team.validation;
-        const isSubmitted = team.status === 'SUBMITTED';
-        // Approve is offered on any team that is not already approved, not just
-        // submitted ones. A FORMING team after the deadline can no longer be
-        // submitted by its students, so gating on SUBMITTED left it unreachable.
-        const canApprove = team.status !== 'APPROVED';
+        const finalised = team.status === 'FINALISED';
+        const broken = (v.violations || []).length > 0;
         document.getElementById('modal-body').innerHTML = `
-            <h3>${team.team_name || 'Team'} <span class="tf-status-badge tf-status-${team.status.toLowerCase()}">${team.status}</span></h3>
+            <h3>${team.team_name || 'Team'} <span class="tf-status-badge tf-status-${team.status.toLowerCase()}">${STATUS_LABEL[team.status] || team.status}</span></h3>
             <p style="font-size:13px;color:#888;margin-bottom:14px">ID: ${team.team_id}</p>
             <div style="background:#7ec8e3;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:700;color:#fff;display:inline-block;margin-bottom:12px">Members</div>
             ${team.members.map((m, i) => `
@@ -654,25 +767,24 @@
                     <span style="min-width:18px;color:#888">${i+1}.</span>
                     <span style="flex:1;font-weight:600">${m.name || m.student_id}</span>
                     <span style="color:#555;min-width:120px">${m.role || '—'}</span>
-                    <span style="font-weight:700;color:${m.status==='ACCEPTED'?'#22c55e':'#e94560'}">${m.status}</span>
                 </div>`).join('')}
             <div style="margin-top:16px;font-size:13px;color:#555">
+                <strong>Size:</strong> ${sizeText(v, team.members.length)}<br>
                 <strong>Shared tutorial:</strong> ${v.sharedTutorials[0] || 'None'}
             </div>
-            ${canApprove ? `
-                <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
-                    <button class="tf-approve-btn" onclick="reviewTeam('${teamId}','approve')">Approve Team</button>
-                    ${isSubmitted ? `<button class="tf-reject-btn" onclick="reviewTeam('${teamId}','reject')">Reject Team</button>` : ''}
-                </div>
-                ${isSubmitted ? '' : `<p style="font-size:12px;color:#666;margin-top:8px">
-                    This team was never submitted. Approving it finalises it directly.</p>`}`
-            : `
-                <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
-                    <button class="tf-reject-btn" onclick="reviewTeam('${teamId}','unapprove')">Disapprove Team</button>
-                </div>
-                <p style="font-size:12px;color:#666;margin-top:8px">
-                    Returns this team to Submitted so you can review it again. The students keep
-                    their team and are not sent back to forming.</p>`}
+            ${broken ? `
+            <div style="margin-top:10px;background:#fdecee;border:1.5px solid #e94560;border-radius:8px;padding:8px 12px;font-size:12px;color:#a8253a">
+                ${v.violations.map(x => `<div><strong>${x.rule}</strong> — ${x.why}</div>`).join('')}
+                <div style="margin-top:4px">The students see this on My Team. It cannot be finalised until fixed.</div>
+            </div>` : ''}
+            <p style="font-size:12px;color:#666;margin-top:14px">These are overrides. Groups record themselves when everyone
+               accepts a team-up request; you only step in here by exception.</p>
+            <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+                ${finalised
+                    ? `<button class="tf-reject-btn" onclick="overrideTeam('${teamId}','reopen')">Reopen</button>`
+                    : `<button class="tf-approve-btn" ${broken ? 'disabled title="Fix the rule breach first"' : ''} onclick="overrideTeam('${teamId}','finalise')">Finalise</button>`}
+                ${team.members.length >= 2 ? `<button class="tf-reject-btn" onclick="overrideTeam('${teamId}','dissolve')">Dissolve</button>` : ''}
+            </div>
         `;
         document.getElementById('teamModal').classList.add('open');
     }
@@ -682,28 +794,18 @@
     }
 
     const ACTION_PROMPT = {
-        approve:   'Approve this team?',
-        unapprove: 'Disapprove this team? It goes back to Submitted for review — its members stay together.',
-        reject:    'Reject this team? Its members go back to forming and will need to resubmit.',
+        finalise: 'Finalise this team? Its members will be notified and can no longer change it. You can reopen it later.',
+        reopen:   'Reopen this team? Its members can change it again until the deadline; after the deadline, use Dissolve or the organiser.',
+        dissolve: 'Dissolve this team? Every member goes back to being on their own. Their "place me anywhere" declarations are kept.',
     };
 
-    async function reviewTeam(teamId, action) {
-        if (!confirm(ACTION_PROMPT[action] || `Are you sure you want to ${action} this team?`)) return;
+    async function overrideTeam(teamId, action) {
+        if (!confirm(ACTION_PROMPT[action])) return;
         try {
-            await put(`/api/units/${unitId}/team-requests/${teamId}`, { action });
+            await put(`/api/units/${unitId}/teams/${teamId}/override`, { action });
             closeModal();
             await loadTeams();
-        } catch(e) { alert(e.message); }
-    }
-
-    async function approveAllSubmitted() {
-        const submitted = allTeams.filter(t => t.status === 'SUBMITTED').length;
-        if (!submitted) return;
-        if (!confirm(`Approve all ${submitted} submitted team${submitted!==1?'s':''}?`)) return;
-        try {
-            const r = await post(`/api/units/${unitId}/team-requests/approve-all`, {});
-            alert(`Approved ${r.approved} team${r.approved!==1?'s':''}.`);
-            await loadTeams();
+            await loadBatches();
         } catch(e) { alert(e.message); }
     }
 

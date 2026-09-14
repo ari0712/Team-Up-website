@@ -43,16 +43,16 @@
             get(`/api/student/units/${unitId}/my-team`)
         ]);
         const el = document.getElementById('final-content');
-        if (!progress.teacher_approved || !teamData.team || teamData.team.status !== 'APPROVED') {
-            el.innerHTML = '<p style="color:#aaa;font-size:15px">Your final team is not yet confirmed. This page will unlock once your teacher approves your team.</p>';
+        if (!teamData.team || teamData.team.status !== 'FINALISED') {
+            el.innerHTML = '<p style="color:#aaa;font-size:15px">Your team has not been finalised yet. Your coordinator finalises teams after the deadline; until then, My Team shows your current group.</p>';
             return;
         }
         const { team, members, validation } = teamData;
         el.innerHTML = `
       <div class="s-card">
-        <h3 style="font-size:19px;font-weight:800;margin-bottom:4px">Team Request Status</h3>
-        <p style="font-size:14px;font-weight:700;color:#22c55e;margin-bottom:8px">Final Team Confirmed</p>
-        <p style="font-size:14px;margin-bottom:16px">Congratulations, your team has been confirmed.</p>
+        <h3 style="font-size:19px;font-weight:800;margin-bottom:4px">Final Team</h3>
+        <p style="font-size:14px;font-weight:700;color:#22c55e;margin-bottom:8px">Finalised by your coordinator</p>
+        <p style="font-size:14px;margin-bottom:16px">Your team is final. Membership can no longer change.</p>
         <p style="font-size:14px;margin-bottom:4px"><strong>Team Name:</strong> ${team.team_name}</p>
         ${validation.sharedTutorials.length ? `<p style="font-size:14px;margin-bottom:12px"><strong>Shared Tutorial:</strong> ${validation.sharedTutorials[0]}</p>` : ''}
         <div style="background:#7ec8e3;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:700;color:#fff;display:inline-block;margin-bottom:12px">Confirmed Members</div>

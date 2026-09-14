@@ -12,7 +12,7 @@
 //
 // Two of the tabs are about team formation. A RECRUITING thread carries its
 // author's live team — derived by the server on every read, never stored on the
-// post — and a button that opens the ordinary merge proposal. The Open teams tab
+// post — and a button that sends the ordinary team-up request. The Open teams tab
 // is the existing Auto-Match, rendered here rather than ranked again.
 
 // ── Text safety ───────────────────────────────────────────────────
@@ -110,7 +110,7 @@ async function foRender() {
 }
 
 // Plain links, so a tab click is an ordinary navigation like opening a thread.
-// Open teams is student-only: a teacher has no team to merge into, and
+// Open teams is student-only: a teacher has no team to team up with, and
 // /teacher/team-formation.html is already their version of that view.
 function foTabBar(active, role) {
     const tab = (key, label) =>
@@ -173,7 +173,7 @@ function foRenderList(data) {
 
 // The one card renderer, shared by recruiting threads, the thread detail strip
 // and the Open teams tab. Everything it draws was derived by the server at read
-// time — nothing here is stored on a post, so it cannot go stale after a merge.
+// time — nothing here is stored on a post, so it cannot go stale after a team-up.
 function foRecruitCard(r) {
     if (!r) return '';
     if (r.gone) return `<div class="fo-recruit">
@@ -182,15 +182,15 @@ function foRecruitCard(r) {
 
     const names = r.members.map(m => m.name || m.student_id).join(', ');
     // Two framings of the same fact. A recruiting post is about THAT team, so it
-    // reads as spots left; an Open teams suggestion is about the merge, so it
+    // reads as spots left; an Open teams suggestion is about teaming up, so it
     // reads as the size you would end up at.
-    const size = r.merged_size
-        ? `Team of ${r.size} · ${r.merged_size} together with yours`
+    const size = r.combined_size
+        ? `Team of ${r.size} · ${r.combined_size} together with yours`
         : `${r.size} of ${r.max_size}${r.spots_left
             ? ` · ${r.spots_left} spot${r.spots_left === 1 ? '' : 's'} left` : ' · full'}`;
 
     const action = r.can_request
-        ? `<button class="fo-btn" onclick="foProposeMerge('${foEsc(r.team_id)}')">Send request</button>`
+        ? `<button class="fo-btn" onclick="foAskToTeamUp('${foEsc(r.team_id)}')">Ask to team up</button>`
         : (r.why_not ? `<span class="fo-recruit-why">${foEsc(r.why_not)}</span>` : '');
 
     return `<div class="fo-recruit">
@@ -228,7 +228,7 @@ async function foRenderOpenTeams(data) {
         team_name: s.team_name,
         members: s.members,
         size: s.members.length,
-        merged_size: s.mergedSize,
+        combined_size: s.combinedSize,
         spots_left: 0,
         reasons: s.reasons,
         can_request: true,
@@ -244,15 +244,15 @@ async function foRenderOpenTeams(data) {
             : `<div class="fo-empty">${foEsc(r.why_empty || 'No suitable teams right now.')}</div>`}`;
 }
 
-// Sending a request IS a yes-vote from you; everyone on both teams still has to
-// agree. On success we refetch rather than navigate, so every card re-derives
+// Sending a request IS your acceptance; everyone on both teams still has to
+// accept. On success we refetch rather than navigate, so every card re-derives
 // itself — the one just actioned flips to "you already have a request open".
-async function foProposeMerge(teamId) {
+async function foAskToTeamUp(teamId) {
     try {
-        const r = await post(`/api/student/units/${foUnitId}/proposals`, { targetTeamId: teamId });
+        const r = await post(`/api/student/units/${foUnitId}/team-requests`, { targetTeamId: teamId });
         alert(r.state === 'approved'
-            ? 'Merge approved — your teams are now combined.'
-            : 'Request sent. It needs a yes from everyone on both teams.');
+            ? 'You are now one group.'
+            : 'Request sent. Everyone on both teams needs to accept it.');
         await foRender();
     } catch (e) { alert(e.message); }
 }

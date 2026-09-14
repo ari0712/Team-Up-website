@@ -211,21 +211,16 @@
         applyPrefsLock(myTeam?.team?.status);
     })();
 
-    // A team that leaves FORMING has been handed to the teacher, so the details
-    // it was validated against are frozen. APPROVED is permanent; a rejected team
-    // goes back to FORMING and this unlocks again.
+    // Preferences freeze only once the coordinator finalises the team. Until
+    // then they stay editable — the server refuses an edit that would put a
+    // recorded group in breach of a rule, and says which rule.
     function applyPrefsLock(teamStatus) {
-        if (!teamStatus || teamStatus === 'FORMING') return;
+        if (teamStatus !== 'FINALISED') return;
         prefsLocked = true;
 
-        const approved = teamStatus === 'APPROVED';
-        document.getElementById('locked-title').textContent = approved
-            ? 'Your team has been approved'
-            : 'Your team request is with your teacher';
-        document.getElementById('locked-detail').textContent = approved
-            ? 'Your preferences are now final and can no longer be changed.'
-            : 'Your preferences are locked so your team is reviewed against the details it was ' +
-              'built from. If your teacher sends the request back, you can edit them again.';
+        document.getElementById('locked-title').textContent = 'Your team has been finalised';
+        document.getElementById('locked-detail').textContent =
+            'Your coordinator has finalised your team, so the preferences it was built from are now final.';
         document.getElementById('locked-banner').classList.add('show');
 
         document.querySelectorAll('.pref-layout input').forEach(el => { el.disabled = true; });
@@ -235,9 +230,7 @@
         btn.disabled = true;
         btn.style.background = '#aaa';
         btn.style.cursor = 'not-allowed';
-        btn.title = approved
-            ? 'Your team has been approved, so preferences can no longer be changed.'
-            : 'Your team request is awaiting teacher review.';
+        btn.title = 'Your team has been finalised, so preferences can no longer be changed.';
     }
 
     function showMessage(kind, text) {
@@ -290,13 +283,12 @@
                 { tutorialSlots, projectInterests, skills, preferredRole, preferredTeammates });
             showMessage('success', 'Preferences saved successfully.');
         } catch (e) {
-            // The team can be submitted from another tab while this page sits
-            // open, so the lock may only show up at save time. Catch up rather
-            // than printing the bare code.
+            // The team can be finalised while this page sits open, so the lock
+            // may only show up at save time. Catch up rather than printing the
+            // bare code.
             if (e.message === 'PREFS_LOCKED') {
-                const myTeam = await get(`/api/student/units/${unitId}/my-team`).catch(() => null);
-                applyPrefsLock(myTeam?.team?.status || 'SUBMITTED');
-                showMessage('error', 'Your team request has been submitted, so your preferences are now locked.');
+                applyPrefsLock('FINALISED');
+                showMessage('error', 'Your team has been finalised, so your preferences are now locked.');
                 return;
             }
             // A server-side rejection must not look like a silent failure.

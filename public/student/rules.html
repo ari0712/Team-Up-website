@@ -65,7 +65,7 @@
         const sizeRange = sizes.length > 1 ? `${sizes[0]}–${sizes[sizes.length-1]}` : sizes[0];
 
         const rules = [
-            `Team must have ${sizeRange} students`,
+            `Target team size: ${sizeRange} students (smaller groups can still be recorded)`,
             unit.max_one_group   ? 'Every student can only be in one team'          : null,
             unit.must_share_tutorial ? 'All members must share at least one tutorial' : null,
             `Maximum ${unit.max_new_to_qut} new-to-QUT students in one team`

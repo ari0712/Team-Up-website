@@ -205,24 +205,23 @@
         .replaceAll("'", '&#039;');
 
     const TYPE_LABEL = {
-        review_pending:  'Needs review',
         deadline:        'Deadline',
-        unformed:        'Unformed',
         needs_attention: 'Needs attention',
-        complete:        'Complete'
+        complete:        'Complete',
+        // Rows from the approval era, kept readable in old inboxes.
+        review_pending:  'Needs review',
+        unformed:        'Unformed'
     };
 
     // Filter tabs, derived from `type` — there is no category stored on the
-    // notification itself. `complete` matches no tab on purpose: Teams is a
-    // queue of work awaiting the teacher, and an approved unit is not work.
-    // It still appears under All.
+    // notification itself. There is no "Teams" queue: groups record themselves
+    // and nothing waits on the coordinator's approval. `complete` matches no
+    // tab on purpose; it still appears under All.
     const CATEGORIES = [
-        { key: 'all',       label: 'All',              empty: 'Nothing yet. Teams awaiting your review, deadline reminders and unit milestones will show up here.',
+        { key: 'all',       label: 'All',              empty: 'Nothing yet. Deadline reminders and students needing attention will show up here.',
           match: () => true },
         { key: 'deadlines', label: 'Deadlines',        empty: 'No deadline reminders for this unit.',
           match: n => n.type === 'deadline' },
-        { key: 'teams',     label: 'Teams',            empty: 'No teams are waiting on your review.',
-          match: n => n.type === 'review_pending' },
         { key: 'at-risk',   label: 'Students at Risk', empty: atRiskEmptyText,
           match: n => n.type === 'unformed' || n.type === 'needs_attention' },
     ];

@@ -14,15 +14,15 @@ const KINDS     = ['DISCUSSION', 'RECRUITING'];
 // the same board back either way.
 //
 // Since recruiting threads it answers a third question — "could this viewer ask
-// to join that poster's team?" — and it answers it by asking ProposalService,
-// never by re-deriving the merge rules here. See _recruiting.
+// to join that poster's team?" — and it answers it by asking TeamRequestService,
+// never by re-deriving the team-up rules here. See _recruiting.
 class ForumService {
-  constructor({ forum, units, enrollment, teams, proposals }) {
+  constructor({ forum, units, enrollment, teams, teamRequestService }) {
     this.forum = forum;
     this.units = units;
     this.enrollment = enrollment;
     this.teams = teams;
-    this.proposals = proposals;
+    this.requests = teamRequestService;
   }
 
   // Resolves what this caller may do in this unit, or throws.
@@ -69,13 +69,13 @@ class ForumService {
   // The viewer's own situation, resolved once per request and shared by every
   // recruiting card on the board rather than re-read per card.
   //
-  // maxSize comes from ProposalService rather than being parsed from the unit
+  // maxSize comes from TeamRequestService rather than being parsed from the unit
   // here, so the number shown as "spots left" is literally the number
-  // createProposal enforces.
+  // sendRequest enforces.
   _viewerCtx(unitId, access) {
     const unit = this.units.findById(unitId);
     const ctx = {
-      maxSize:    this.proposals.getMaxTeamSize(unitId),
+      maxSize:    this.requests.getMaxTeamSize(unitId),
       validSizes: unit ? unit.valid_team_sizes || '' : '',
       locked:     isLocked(unit),
       myTeamId:   null,
@@ -94,7 +94,7 @@ class ForumService {
   // Everything a recruiting card shows, derived at read time.
   //
   // Nothing here is stored on the thread — not the team, not its size, not
-  // whether it has room. An approved merge deletes one of the two team rows
+  // whether it has room. An accepted team-up deletes one of the two team rows
   // outright, so any of it written onto the post would be wrong by the next
   // merge. The cost is a few indexed reads per recruiting thread: the same trade
   // the reply-count subquery already makes.
@@ -128,7 +128,7 @@ class ForumService {
     if (ctx.locked)    { out.why_not = 'Team formation has closed for this unit.'; return out; }
     if (!ctx.myTeamId) { out.why_not = 'You are not on a team in this unit yet.';  return out; }
 
-    const check = this.proposals.checkProposal({
+    const check = this.requests.checkRequest({
       unitId,
       sourceTeamId: ctx.myTeamId,
       targetTeamId: team.team_id,
@@ -139,13 +139,14 @@ class ForumService {
     return out;
   }
 
-  // checkProposal's messages are written for an API error; these are written for
+  // checkRequest's messages are written for an API error; these are written for
   // a card. Switching on the code rather than on the text is what stops the two
   // drifting apart when a guard's wording changes.
   _whyNot(check, team, ctx) {
     switch (check.code) {
       case 'SELF':        return 'This is your own team.';
-      case 'NOT_FORMING': return 'That team has already submitted.';
+      case 'FINALISED':   return 'That team has been finalised by the coordinator.';
+      case 'RULE':        return check.reason;
       case 'TOO_BIG':     return `Your team of ${ctx.mySize} plus their ${team.size} `
                                + `is over the limit of ${check.max}.`;
       case 'DUPLICATE':   return 'You already have a request open with this team.';

@@ -12,7 +12,7 @@ module.exports = function createUnitsRouter({ unitService, matchingService }) {
   const send = (res, fn) => {
     try { return fn(); }
     catch (e) {
-      if (e && e.status) return res.status(e.status).json({ error: e.message });
+      if (e && e.status) return res.status(e.status).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
       console.error('Unit service error:', e);
       return res.status(500).json({ error: 'Internal error' });
     }
@@ -45,20 +45,26 @@ module.exports = function createUnitsRouter({ unitService, matchingService }) {
   router.put('/:unitId/progress/:studentId', requireTeacher, (req, res) =>
     send(res, () => {
       const { stage, value } = req.body;
-      svc.setStudentStage(req.params.unitId, req.params.studentId, stage, value);
+      svc.setStudentStage(req.params.unitId, username(req), req.params.studentId, stage, value);
       res.json({ ok: true });
     }));
 
-  // ── Team requests / review ──────────────────────────────────────
-  router.get('/:unitId/team-requests', requireTeacher, (req, res) =>
-    send(res, () => res.json(svc.getTeamRequests(req.params.unitId, username(req)))));
-
-  router.post('/:unitId/team-requests/approve-all', requireTeacher, (req, res) =>
-    send(res, () => res.json(svc.approveAll(req.params.unitId, username(req)))));
-
-  router.put('/:unitId/team-requests/:teamId', requireTeacher, (req, res) =>
+  // ── Coordinator override (exception path, never a required step) ──
+  router.put('/:unitId/teams/:teamId/override', requireTeacher, (req, res) =>
     send(res, () => res.json(
-      svc.reviewTeam(req.params.unitId, username(req), req.params.teamId, (req.body || {}).action))));
+      svc.overrideTeam(req.params.unitId, username(req), req.params.teamId, (req.body || {}).action))));
+
+  router.get('/:unitId/finalise-batches', requireTeacher, (req, res) =>
+    send(res, () => res.json(svc.listFinaliseBatches(req.params.unitId, username(req)))));
+
+  router.post('/:unitId/finalise-batches/:batchId/revert', requireTeacher, (req, res) =>
+    send(res, () => res.json(
+      svc.revertFinaliseBatch(req.params.unitId, username(req), req.params.batchId))));
+
+  // What a proposed rules change would do to existing groups. Read-only; the
+  // rules modal calls it as the coordinator edits.
+  router.get('/:unitId/rules/impact', requireTeacher, (req, res) =>
+    send(res, () => res.json(svc.previewRulesImpact(req.params.unitId, username(req), req.query || {}))));
 
   // ── Teams & class list ──────────────────────────────────────────
   router.get('/:unitId/all-teams', requireTeacher, (req, res) =>
@@ -66,6 +72,11 @@ module.exports = function createUnitsRouter({ unitService, matchingService }) {
 
   router.get('/:unitId/class-list', requireTeacher, (req, res) =>
     send(res, () => res.json(svc.getClassList(req.params.unitId, username(req)))));
+
+  // The coordinator's report, as rows. The page renders and downloads exactly
+  // what this returns.
+  router.get('/:unitId/export', requireTeacher, (req, res) =>
+    send(res, () => res.json(svc.buildExport(req.params.unitId, username(req)))));
 
   // ── Announcements ───────────────────────────────────────────────
   router.get('/:unitId/announcements', requireTeacher, (req, res) =>
@@ -77,17 +88,14 @@ module.exports = function createUnitsRouter({ unitService, matchingService }) {
       res.json(svc.postAnnouncement(req.params.unitId, username(req), title, content));
     }));
 
-  // ── Auto-matching (only once the deadline has locked formation) ──
+  // ── Organiser (only once the deadline has locked formation) ──
   router.get('/:unitId/suggestions', requireTeacher, (req, res) =>
     send(res, () => res.json(matchingService.suggest(req.params.unitId, username(req)))));
 
-  router.post('/:unitId/apply-teams', requireTeacher, (req, res) =>
-    send(res, () => {
-      // `approve` is deliberately not read: applying always approves, so an old
-      // client sending approve:false cannot strand a team in FORMING.
-      const { teams } = req.body || {};
-      res.json(matchingService.applyTeams(req.params.unitId, username(req), teams));
-    }));
+  // Finalises a grouping as one revertible batch.
+  router.post('/:unitId/finalise-teams', requireTeacher, (req, res) =>
+    send(res, () => res.json(
+      svc.finaliseTeams(req.params.unitId, username(req), (req.body || {}).teams))));
 
   // ── Roster (who may join) ───────────────────────────────────────
   router.get('/:unitId/roster', requireTeacher, (req, res) =>
@@ -117,9 +125,11 @@ module.exports = function createUnitsRouter({ unitService, matchingService }) {
     send(res, () => res.json(
       svc.renameTutorialSlot(req.params.unitId, username(req), req.params.slotId, (req.body || {}).label))));
 
+  // ?dryRun=1 answers "which groups would this break?" without deleting.
   router.delete('/:unitId/tutorial-slots/:slotId', requireTeacher, (req, res) =>
     send(res, () => res.json(
-      svc.deleteTutorialSlot(req.params.unitId, username(req), req.params.slotId))));
+      svc.deleteTutorialSlot(req.params.unitId, username(req), req.params.slotId,
+        { dryRun: String(req.query.dryRun || '') === '1' }))));
 
   return router;
 };

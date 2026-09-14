@@ -44,14 +44,6 @@ function buildTable(cols, rows, opts = {}) {
   return html;
 }
 
-// Status badge helper
-function statusBadge(status) {
-  const map = {
-    FORMING: 'badge-yellow', COMPLETE: 'badge-green',
-    PENDING: 'badge-yellow', ACCEPTED: 'badge-green', REJECTED: 'badge-red'
-  };
-  return `<span class="badge ${map[status] || 'badge-muted'}">${status}</span>`;
-}
 
 // Build multi-select list HTML. Caller passes the slot labels for the unit
 // (teacher-managed via /api/units/:unitId/tutorial-slots).

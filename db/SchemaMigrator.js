@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { ABOUT_COLUMNS } = require('../utils/aboutFields');
+const { validateTeam } = require('../utils/teamValidator');
 
 // Owns all schema creation and one-shot data migrations. Operates directly on
 // the raw sql.js handle so the DDL and the legacy migrations behave exactly as
@@ -81,6 +82,11 @@ class SchemaMigrator {
     // ── ADDITION 1: add deadline column to existing units table (safe if already exists)
     try { db.run(`ALTER TABLE units ADD COLUMN deadline TEXT DEFAULT ''`); } catch (e) {}
 
+    // Whether the export may carry the student number (n-number). OFF by
+    // default: whether that identifier may leave the system depends on where
+    // TeamUp is hosted, which is an open decision. Email is always exported.
+    try { db.run(`ALTER TABLE units ADD COLUMN export_student_number INTEGER NOT NULL DEFAULT 0`); } catch (e) {}
+
     try { db.run(`ALTER TABLE users ADD COLUMN student_id TEXT DEFAULT ''`); } catch (e) {}
 
     // ── ADDITION 2: students imported from CSV per unit
@@ -99,6 +105,15 @@ class SchemaMigrator {
     UNIQUE(unit_id, student_id),
     FOREIGN KEY (unit_id) REFERENCES units(unit_id)
   )`);
+
+    // "I have no preferred teammates — place me anywhere." A student's explicit
+    // declaration, timestamped. It is a user ACTION, not derived state, which is
+    // why it is a real column: a solo student who declared and one who went
+    // silent look identical in every other table, and the coordinator needs to
+    // tell them apart. '' means never declared. Cleared the moment the student
+    // joins a group (ProposalService.executeMerge, MatchingService.applyTeams)
+    // so stale intent is never shown as current intent.
+    try { db.run(`ALTER TABLE unit_students ADD COLUMN no_preference_at TEXT DEFAULT ''`); } catch (e) {}
 
     // ── Unit roster: WHO IS ALLOWED to join a unit ─────────────────
     // Deliberately separate from unit_students, which means "actually enrolled"
@@ -162,12 +177,14 @@ class SchemaMigrator {
     }
 
     // ── STUDENT PORTAL: unit-scoped teams ─────────────────────────
+    // status is OPEN or FINALISED (see repositories/teamRepository.js). Older
+    // databases carry FORMING/SUBMITTED/APPROVED and are rewritten below.
     db.run(`CREATE TABLE IF NOT EXISTS unit_teams (
       team_id      TEXT PRIMARY KEY,
       unit_id      TEXT NOT NULL,
       team_name    TEXT DEFAULT '',
       created_by   TEXT NOT NULL,
-      status       TEXT DEFAULT 'FORMING',
+      status       TEXT DEFAULT 'OPEN',
       submitted_at TEXT DEFAULT '',
       quality_score INTEGER DEFAULT 0,
       FOREIGN KEY (unit_id) REFERENCES units(unit_id)
@@ -215,7 +232,10 @@ class SchemaMigrator {
     // sides of a cancelled proposal see it, so the row can only be phrased
     // correctly if it knows which side went away — and that is unrecoverable
     // afterwards, because the losing team row is deleted by then.
-    try { db.run(`ALTER TABLE proposals ADD COLUMN cancelled_by_student_ids TEXT`); } catch (e) {}
+    try { db.run(`ALTER TABLE proposals ADD COLUMN cancelled_by_student_ids TEXT`); } catch (e) {}
+    // Why a request was invalidated (a team finalised, or a rule the two teams
+    // would now break). Shown to the students; '' / NULL when not applicable.
+    try { db.run(`ALTER TABLE proposals ADD COLUMN invalidated_reason TEXT`); } catch (e) {}
     db.run(`CREATE INDEX IF NOT EXISTS idx_proposals_unit_state ON proposals(unit_id, state)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_proposals_expires ON proposals(state, expires_at)`);
 
@@ -234,10 +254,40 @@ class SchemaMigrator {
     // ── Stable per-unit team number (drives 'Team N' naming) ─────
     try { db.run(`ALTER TABLE unit_teams ADD COLUMN team_number INTEGER DEFAULT 0`); } catch (e) {}
 
-    // Timestamp of the most recent teacher rejection. Drives the "your last
-    // submission was rejected" notice on the my-team page after the team is
-    // bounced back to FORMING.
+    // Legacy: the teacher-approval era's rejection stamp. No longer written or
+    // read; kept so old rows load. Nothing depends on it.
     try { db.run(`ALTER TABLE unit_teams ADD COLUMN last_rejected_at TEXT DEFAULT ''`); } catch (e) {}
+
+    // The coordinator's override stamps. finalised_at / reopened_at are what
+    // the student notifications key on; finalise_batch_id ties a team to the
+    // organiser save that finalised it so the whole batch can be reverted.
+    try { db.run(`ALTER TABLE unit_teams ADD COLUMN finalised_at TEXT DEFAULT ''`); } catch (e) {}
+    try { db.run(`ALTER TABLE unit_teams ADD COLUMN finalise_batch_id TEXT DEFAULT ''`); } catch (e) {}
+    try { db.run(`ALTER TABLE unit_teams ADD COLUMN reopened_at TEXT DEFAULT ''`); } catch (e) {}
+
+    // One organiser save = one batch. snapshot_json holds the affected teams,
+    // their memberships and each affected student's no_preference_at as they
+    // were BEFORE the save, so a bad allocation at 400-student scale can be
+    // undone as a unit rather than one team at a time.
+    db.run(`CREATE TABLE IF NOT EXISTS finalise_batches (
+      batch_id      TEXT PRIMARY KEY,
+      unit_id       TEXT NOT NULL,
+      created_by    TEXT NOT NULL,
+      created_at    TEXT NOT NULL,
+      team_count    INTEGER NOT NULL DEFAULT 0,
+      student_count INTEGER NOT NULL DEFAULT 0,
+      snapshot_json TEXT NOT NULL DEFAULT '{}',
+      reverted_at   TEXT,
+      FOREIGN KEY (unit_id) REFERENCES units(unit_id)
+    )`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_finalise_batches_unit
+              ON finalise_batches(unit_id, created_at)`);
+
+    // ── Approval era → OPEN / FINALISED ──────────────────────────
+    // FORMING and SUBMITTED both meant "students can still change this";
+    // APPROVED was the only teacher-written terminal state. Idempotent: a
+    // second boot matches nothing.
+    this.migrateTeamStatuses();
 
     // ── Teacher-managed tutorial slots per unit ─────────────────────
     db.run(`CREATE TABLE IF NOT EXISTS unit_tutorial_slots (
@@ -260,7 +310,8 @@ class SchemaMigrator {
     // ── Backfill 'Team N' names for any team with team_number=0 ───
     this.backfillTeamNumbers();
 
-    // ── Add teacher_approved stage to existing student_progress ───
+    // Legacy: the approval era's stage. No longer written; the "finalised"
+    // stage is derived from the team's status at read time.
     try { db.run(`ALTER TABLE student_progress ADD COLUMN teacher_approved INTEGER DEFAULT 0`); } catch (e) {}
 
     // ── Announcements per unit ─────────────────────────────────────
@@ -406,6 +457,72 @@ class SchemaMigrator {
     // link so a send can be opened and inspected.
     try { db.run(`ALTER TABLE email_outbox ADD COLUMN intended_recipient TEXT`); } catch (e) {}
     try { db.run(`ALTER TABLE email_outbox ADD COLUMN preview_url TEXT`); } catch (e) {}
+
+    // Every group of 2+ against its unit's hard rules. Nothing is changed —
+    // a group that breaks a rule stays OPEN and is reported here, so the
+    // coordinator learns about it at boot rather than at finalise time.
+    const broken = this.revalidateGroups();
+    for (const b of broken) {
+      console.warn(`Migration: ${b.team_name} (${b.unit_name}) breaks a hard rule — ${b.reason}`);
+    }
+  }
+
+  // FORMING/SUBMITTED → OPEN, APPROVED → FINALISED. Runs every boot; a no-op
+  // once done. The legacy `teams` table is untouched — nothing reads it.
+  migrateTeamStatuses() {
+    const db = this.db;
+    const count = sql => { const st = db.prepare(sql); st.step(); const n = st.getAsObject().n; st.free(); return n; };
+    const before = count(`SELECT COUNT(*) AS n FROM unit_teams WHERE status IN ('FORMING','SUBMITTED','APPROVED')`);
+    if (!before) return 0;
+    db.run(`UPDATE unit_teams SET status = 'OPEN' WHERE status IN ('FORMING', 'SUBMITTED')`);
+    db.run(`UPDATE unit_teams SET status = 'FINALISED',
+                                  finalised_at = CASE WHEN finalised_at = '' THEN COALESCE(NULLIF(submitted_at, ''), ?) ELSE finalised_at END
+             WHERE status = 'APPROVED'`, [new Date().toISOString()]);
+    console.log(`Team status migration: ${before} team(s) mapped to OPEN / FINALISED`);
+    return before;
+  }
+
+  // Every group of 2+ in every unit, validated against its unit's rules in one
+  // query — not one per team. Returns [{ unit_id, unit_name, team_id,
+  // team_name, status, reason }] for the groups that break a hard rule.
+  // Read-only: the caller decides what to do with the list.
+  revalidateGroups() {
+    const db = this.db;
+    const all = (sql, params = []) => {
+      const st = db.prepare(sql); st.bind(params);
+      const rows = []; while (st.step()) rows.push(st.getAsObject()); st.free(); return rows;
+    };
+    const units = new Map(all(`SELECT * FROM units`).map(u => [u.unit_id, u]));
+    const rows = all(
+      `SELECT t.unit_id, t.team_id, t.team_name, t.status,
+              tm.student_id, tm.status AS member_status, us.name, us.is_new_to_qut,
+              sup.tutorial_slots, us.tutorial_time
+         FROM unit_team_members tm
+         INNER JOIN unit_teams t ON t.team_id = tm.team_id
+         INNER JOIN unit_students us ON us.unit_id = t.unit_id AND us.student_id = tm.student_id
+         LEFT JOIN student_unit_prefs sup ON sup.unit_id = t.unit_id AND sup.student_id = tm.student_id`
+    );
+    const teams = new Map();
+    for (const r of rows) {
+      if (!teams.has(r.team_id)) teams.set(r.team_id, { unit_id: r.unit_id, team_id: r.team_id, team_name: r.team_name, status: r.status, members: [] });
+      teams.get(r.team_id).members.push({
+        student_id: r.student_id, status: r.member_status, name: r.name,
+        is_new_to_qut: r.is_new_to_qut, tutorial_slots: r.tutorial_slots, tutorial_time: r.tutorial_time
+      });
+    }
+    const broken = [];
+    for (const t of teams.values()) {
+      if (t.members.length < 2) continue;
+      const unit = units.get(t.unit_id);
+      if (!unit) continue;
+      const v = validateTeam(t.members, unit, { tutorialFallback: true, includeAllAccepted: true });
+      if (!v.violations.length) continue;
+      broken.push({
+        unit_id: t.unit_id, unit_name: unit.unit_name, team_id: t.team_id, team_name: t.team_name,
+        status: t.status, reason: `${v.violations[0].rule} — ${v.violations[0].why}`
+      });
+    }
+    return broken;
   }
 
   // One-shot migration: everyone already enrolled becomes rostered.
@@ -493,7 +610,7 @@ class SchemaMigrator {
         prefStmt.free();
 
         db.run(
-          `INSERT INTO unit_teams (team_id, unit_id, team_name, created_by, status) VALUES (?,?,?,?, 'FORMING')`,
+          `INSERT INTO unit_teams (team_id, unit_id, team_name, created_by, status) VALUES (?,?,?,?, 'OPEN')`,
           [teamId, o.unit_id, teamName, o.student_id]
         );
         db.run(
@@ -558,7 +675,7 @@ class SchemaMigrator {
           targetTeamId = crypto.randomUUID();
           const teamName = `${inviteeName || inv.to_student}'s team`;
           db.run(
-            `INSERT INTO unit_teams (team_id, unit_id, team_name, created_by, status) VALUES (?,?,?,?, 'FORMING')`,
+            `INSERT INTO unit_teams (team_id, unit_id, team_name, created_by, status) VALUES (?,?,?,?, 'OPEN')`,
             [targetTeamId, inv.unit_id, teamName, inv.to_student]
           );
           db.run(

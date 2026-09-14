@@ -20,7 +20,7 @@ module.exports = function createForumRouter({ forumService }) {
   const send = (res, fn) => {
     try { return fn(); }
     catch (e) {
-      if (e && e.status) return res.status(e.status).json({ error: e.message });
+      if (e && e.status) return res.status(e.status).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
       console.error('Forum error:', e);
       return res.status(500).json({ error: 'Internal error' });
     }

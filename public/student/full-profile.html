@@ -188,8 +188,7 @@
         ${avatarHtml(src, profile.name)}
         <div style="min-width:0">
           <div class="fp-name">${esc(profile.name)}${
-              profile.studentNumber && profile.studentNumber !== profile.name
-                  ? `<span class="fp-id"> – Student ID: ${esc(profile.studentNumber)}</span>` : ''}</div>
+              profile.email ? `<span class="fp-id"> – ${esc(profile.email)}</span>` : ''}</div>
           <div class="fp-role">Preferred Role: ${esc(profile.preferredRole || 'Not set')}</div>
           ${tagLine('Tutorial availability', profile.tutorialSlots)}
           ${tagLine('Skills', profile.skills)}
@@ -221,7 +220,7 @@
       ${editing
           ? `<p class="fp-hint">Every question below is optional — fill in what you want your
                classmates to know and leave the rest blank. This stays editable even after your
-               team is submitted.</p>`
+               team is finalised.</p>`
           : ''}
       ${body}
       <div class="fp-actions">

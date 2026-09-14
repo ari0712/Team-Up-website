@@ -31,6 +31,16 @@ http://localhost:3000
 
 The server listens on `PORT` (default `3000`).
 
+### Tests
+
+```bash
+npm test
+```
+
+Runs the `node:test` suites in `test/` against a throwaway database in the OS temp
+directory — never against `teamup.db`. Node 21+ is needed for the glob in the
+script; on older Node run `node --test test/teamValidator.test.js` etc. directly.
+
 ## Upgrading from an older clone
 
 **Read this before pulling if you cloned before `921353e`.** `teamup.db` used to be committed. It no
@@ -107,25 +117,32 @@ Open `http://localhost:3000` to reach the portal-select page. From there you sig
   the university per team).
 - **Import a class list** – bulk-import students from a parsed CSV when creating a unit.
 - **Progress dashboard** – per-unit aggregate counts across the student journey
-  (read rules → entered preferences → in a team → submitted request → approved).
-- **Class list** – every enrolled student with their individual progress stages and
-  saved preferences.
-- **Team requests** – review teams students have submitted and **approve** or
-  **reject** them; approvals mark each member as teacher-approved.
-- **All teams** – every team in the unit with live **validation** (size, shared
-  tutorial, new-to-university limit, all-members-accepted).
+  (read rules → entered preferences → grouped / declared / no activity → finalised).
+- **Class list** – every enrolled student with their progress stages, placement
+  category and saved preferences.
+- **All teams** – every team in the unit with live **validation** (size against the
+  target, shared tutorial, new-to-university limit) and the coordinator's overrides:
+  **finalise**, **reopen**, **dissolve**. Nothing waits on approval — groups record
+  themselves (see *How a group is recorded*).
+- **Organiser** – after the deadline, an auto-match suggestion the coordinator can
+  edit and **finalise** as one revertible batch.
 - **Announcements** – post unit announcements.
 
 ### Student portal
-- **Account** – sign up / log in (student ID captured at signup).
+- **Account** – sign up / log in. The student number is captured at signup for the
+  coordinator's opt-in export only; it is never shown to any student, including its owner.
 - **Browse & join units** – see available units and join one.
 - **Read the rules** for a unit and track progress through each stage.
 - **Set preferences** – tutorial slots, project interests, skills, preferred role,
   preferred teammates (saved per unit).
-- **Find teammates** – search and filter classmates by name, tutorial, interest, or skill.
-- **Teams** – create a team, invite classmates, accept/decline invites, leave/remove
-  members, and **submit** the team for teacher review once everyone has accepted.
-- **My team** – view members and live rule validation for your team.
+- **Find teammates** – search classmates by **name** (tolerant of misspellings and partial
+  input) or by a **full connect email you already have**; filter by tutorial, interest, or
+  skill. A classmate's email is shown only when two results share a name.
+- **Team up** – ask a classmate (or their group) to team up; everyone on both sides
+  accepts or declines. Unanimous acceptance joins the two teams — that is the record.
+  Leave or remove members until the deadline.
+- **My team** – view members and live rule validation for your team; declare
+  *"place me anywhere"* if you are on your own with no preferred teammates.
 
 ## Project structure
 
@@ -150,11 +167,11 @@ teamup-web/
 ├── services/                 Business logic (classes, constructor injection)
 │   ├── authService.js        class AuthService — SHA-256 hashing, login/signup
 │   ├── studentService.js     class StudentService — student profile lookup
-│   └── proposalService.js    class ProposalService — vote-gated team merge proposals
+│   └── teamRequestService.js class TeamRequestService — team-up requests, rules checked at send and accept
 ├── routes/                   Express REST API (router factories: deps → router)
 │   ├── auth.js               login / signup / logout / me
 │   ├── units.js              teacher: units, class lists, progress, team reviews, announcements
-│   └── student.js            student: join units, preferences, teams, proposals, submit
+│   └── student.js            student: join units, preferences, teams, team-up requests
 ├── middleware/auth.js        Session guards (requireAuth / requireStudent / requireTeacher)
 ├── utils/                    Helpers (uuid, team-size parsing, team validation)
 └── public/                   Frontend (static HTML / CSS / vanilla JS)
@@ -176,15 +193,112 @@ created automatically by `db/SchemaMigrator.js` on startup (idempotent
 
 | Table | Purpose |
 |-------|---------|
-| `users` | accounts (username, password hash, email, role, student_id) |
+| `users` | accounts (username, password hash, email, role, `student_id` — the n-number, stored for the export option only) |
 | `students` | student profile (display name, major, tutorial availability, units passed) |
 | `units` | a unit/class and its team-formation rules |
-| `unit_students` | class list imported per unit |
+| `unit_roster` | who may join a unit, keyed by email (the teacher's class list) |
+| `unit_students` | who has actually joined; carries the roster attributes and the student's "place me anywhere" declaration (`no_preference_at`) |
 | `student_progress` | per-student stage tracking within a unit |
 | `student_unit_prefs` | per-student preferences within a unit |
 | `unit_teams` / `unit_team_members` | unit-scoped teams and membership |
-| `proposals` / `proposal_votes` | vote-gated team merge proposals |
+| `proposals` / `proposal_votes` | team-up requests and each member's accept/decline (legacy table names) |
+| `finalise_batches` | one row per organiser save, with a snapshot so the batch can be reverted |
 | `unit_announcements` | teacher announcements per unit |
+
+### How a group is recorded
+
+There is no submit step and no teacher approval. A student asks another team to
+**team up**; every member of both teams **accepts** or **declines**. The moment
+everyone has accepted, the two teams become one — that is the record of mutual
+preference. The unit's hard rules are evaluated twice on the way: when the request
+is sent (an infeasible team-up is refused with `400 RULE`, naming the rule and why)
+and again just before the teams are joined (preferences may have moved). A
+preference change that would put a recorded group in breach is refused too
+(`400 PREFS_WOULD_BREAK_GROUP`).
+
+The unit's **deadline** is the only thing that freezes students: after it, sending,
+accepting, leaving and removing all return `403 DEADLINE_PASSED` server-side.
+
+### Team size is a target, not a gate
+
+`units.valid_team_sizes` (e.g. `4,5`) is the size the coordinator is aiming for in the
+final allocation. It does **not** stop a smaller group forming: a pair or trio who want
+to work together is a valid, incomplete record. What the server does refuse are the
+hard rules — no shared tutorial slot (when the unit requires one), more new-to-QUT
+students than the cap, or more members than the largest allowed size. See
+`utils/teamValidator.js`.
+
+A student who is alone can declare *"I have no preferred teammates — place me
+anywhere"* (`POST /api/student/units/:unitId/no-preference`). Every student then falls
+into one of three **placement** categories (`utils/placement.js`): `GROUPED`,
+`DECLARED`, `SILENT`. The class list, the export and the teacher's attention
+notifications all use these.
+
+### Team status: OPEN / FINALISED
+
+A team is `OPEN` (students can still change it) or `FINALISED` (the coordinator has
+allocated it; frozen). Only the coordinator writes `FINALISED`, by exception: per team
+(finalise / reopen / dissolve) or from the organiser, where every save is a batch with
+a snapshot and can be reverted as a unit. Databases from the approval era are
+migrated on boot (`FORMING`,`SUBMITTED` → `OPEN`; `APPROVED` → `FINALISED`) and every
+group of 2+ is re-validated; groups that break a rule are reported in the log.
+
+A recorded group can still be put in breach later by a rule edit, a tutorial-slot
+delete or a roster re-import. The rules modal previews which groups a change would
+break before it is saved (`GET /api/units/:unitId/rules/impact`), the students see
+the breach on My Team with the rule named, and the organiser dissolves such groups
+(reporting why) rather than treating them as protected.
+
+Auto-match (`services/matchingService.js`) is a suggestion tool: it never splits a
+feasible OPEN group. It does not balance tutorial load across teams.
+
+### Identifiers: who can see what
+
+Students cannot see anyone's student number (n-number) in QUT systems, so the app
+never shows one to a student — not a classmate's, not their own — and never puts one
+in a payload a student can read. The number is captured at signup and stored
+(`users.student_id`, `unit_roster.student_number`) for exactly one reader: the export's
+opt-in column (`UserRepository.listStudentNumbers`, called only from `buildExport`).
+The teacher class list and roster views identify students by name and email.
+
+**Classmate search** (`GET /api/student/units/:unitId/students?search=`) matches names
+tolerantly (`utils/studentSearch.js`: partial tokens, order-free, small edit distance)
+and emails **exactly on the full address** — never on a prefix or fragment, so an
+address cannot be fished for. What comes back is governed server-side:
+
+- a classmate's email is attached to a row **only when two or more results share the
+  same normalised name** — the one case where the name cannot tell them apart;
+- a row found by its email comes back *without* the email (the searcher typed it;
+  echoing it would confirm a guess);
+- every other row carries no email.
+
+The endpoint is rate-limited per student per unit (30 queries / 5 minutes → `429
+SEARCH_RATE_LIMITED`, one warn line per rejection naming the user and unit, never the
+query). Any sane session is a handful of queries; a burst is someone walking the
+address space.
+
+The export (`GET /api/units/:unitId/export`) identifies every student by **email** —
+the address on the teacher's roster, which is the join key against the class list.
+
+### Open decisions
+
+These are deliberately not settled by the code. Each is on record here so a
+deployment makes the call consciously rather than by default.
+
+1. **Student number in the export.** Off by default (`units.export_student_number`).
+   Whether the n-number may leave the system depends on whether TeamUp is hosted
+   inside QUT.
+2. **Directory email visibility.** Students are never shown the cohort's addresses
+   as a list. Whether they may be depends on the same hosting question and on how
+   much contact between strangers the unit wants to enable.
+3. **The shared-name disclosure.** As implemented, when two enrolled students share a
+   name, anyone who searches that name sees **both full connect addresses** — that is
+   how they are told apart. The narrower alternative is to show only a masked local
+   part (e.g. `a.ch••@connect.qut.edu.au`), which still separates most pairs but is not
+   a usable address. Implemented as full-address; the choice is recorded, not implied.
+4. **The search rate limiter is in-memory and per-process.** It resets on restart and
+   is not shared across instances — fine for the single-process sql.js deployment this
+   app is. Running TeamUp multi-instance needs a shared store (Redis, or a table).
 
 ## API Reference
 
@@ -210,8 +324,13 @@ session of the matching role.
 | PUT  | `/:unitId/progress/:studentId` | Update a student's stage |
 | GET  | `/:unitId/class-list` | Class list with per-student progress + prefs |
 | GET  | `/:unitId/all-teams` | All teams with validation |
-| GET  | `/:unitId/team-requests` | Submitted teams awaiting review |
-| PUT  | `/:unitId/team-requests/:teamId` | Approve / reject a team |
+| PUT  | `/:unitId/teams/:teamId/override` | Coordinator override: `finalise` / `reopen` / `dissolve` |
+| GET  | `/:unitId/finalise-batches` | Organiser saves, newest first |
+| POST | `/:unitId/finalise-batches/:batchId/revert` | Put a batch back exactly as it was |
+| GET  | `/:unitId/rules/impact` | Which groups a proposed rules change would break (read-only) |
+| GET  | `/:unitId/export` | The coordinator's report as rows: teams, ungrouped students by category, summary |
+| GET  | `/:unitId/suggestions` | Auto-match suggestion (after the deadline) |
+| POST | `/:unitId/finalise-teams` | Finalise a grouping as one revertible batch (after the deadline) |
 | GET  | `/:unitId/announcements` | List announcements |
 | POST | `/:unitId/announcements` | Post an announcement |
 | GET  | `/student/enrolled` | (student) Units the caller is enrolled in |
@@ -226,13 +345,11 @@ session of the matching role.
 | GET/POST | `/units/:unitId/prefs` | Get / save preferences |
 | GET  | `/units/:unitId/students` | Search/filter classmates |
 | GET  | `/units/:unitId/my-team` | Own team + validation |
-| POST | `/units/:unitId/teams` | Create a team |
-| POST | `/units/:unitId/teams/:teamId/invite` | Invite a classmate |
-| POST | `/units/:unitId/teams/:teamId/submit` | Submit team for review |
+| POST/DELETE | `/units/:unitId/no-preference` | Declare / withdraw "place me anywhere" (solo students) |
 | DELETE | `/units/:unitId/teams/:teamId/members/:studentId` | Remove a member |
-| POST | `/units/:unitId/proposals` | Propose merging with another team |
-| GET  | `/units/:unitId/proposals` | List proposals the caller is part of |
-| PATCH | `/units/:unitId/proposals/:id/vote` | Vote yes / no on a proposal |
+| POST | `/units/:unitId/team-requests` | Ask another team to team up (rules checked, `400 RULE` if infeasible) |
+| GET  | `/units/:unitId/team-requests` | List requests the caller is part of |
+| PATCH | `/units/:unitId/team-requests/:id/respond` | `{ response: 'accept' \| 'decline' }` |
 
 ## Email notifications
 
@@ -282,7 +399,8 @@ This is a student project / prototype, not production-hardened software:
   variable before any real deployment.
 - `sql.js` keeps the whole database in memory and rewrites `teamup.db` on every write,
   which is fine for a class-sized dataset but not for high concurrency.
-- Auto-matching (`services/proposalService.js`) is experimental and not fully wired in.
+- Auto-matching (`services/matchingService.js`) suggests only; it does not consider
+  tutorial load balance across teams.
 
 ## License
 

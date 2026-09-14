@@ -58,41 +58,76 @@ class MatchingService {
     return unit;
   }
 
-  // Students who still need a team: everyone whose current team is not APPROVED
-  // and does not pass the unit's own size rule. Viability comes from
-  // validateTeam, NOT team status — submitTeam performs no validation, so a
-  // SUBMITTED team can be the wrong size and still need regrouping.
-  pool(unitId, unit) {
-    const stuck = [];
-    const settled = [];
-    for (const team of this.teams.listAllWithCounts(unitId)) {
-      const members = this.teams.getMembersDetailed(unitId, team.team_id);
-      const accepted = members.filter(m => m.status === 'ACCEPTED');
-      const viable = team.status === 'APPROVED' ||
-                     validateTeam(members, unit, { includeAllAccepted: true }).sizeValid;
-      (viable ? settled : stuck).push({ team, members: accepted });
-    }
+  // A group of 2+ that the matcher must never split: OPEN, and breaking no
+  // hard rule right now. This is an invariant, not a preference — finaliseTeams
+  // refuses a payload that splits one, whoever built it.
+  //
+  // A group WITH a violation is not protected. Rule edits, slot deletes and
+  // roster re-imports can all put a recorded group in breach after the fact;
+  // keeping it together would only reproduce the violation. It is dissolved,
+  // and the suggestion says so and why.
+  _isProtected(team, unit) {
+    const accepted = team.members.filter(m => m.status === 'ACCEPTED');
+    if (team.status !== 'OPEN' || accepted.length < 2) return { protected: false };
+    const v = validateTeam(team.members, unit, { includeAllAccepted: true, tutorialFallback: true });
+    if (!v.violations.length) return { protected: true };
+    return { protected: false, reason: `${v.violations[0].rule} — ${v.violations[0].why}` };
+  }
 
+  // Who still needs placing, and in what form. One query for every team and
+  // member in the unit, not one per team.
+  //
+  //   settled    FINALISED teams. Untouched.
+  //   seeds      protected groups under the target size. Kept whole; the
+  //              matcher only ever ADDS to them.
+  //   dissolved  OPEN groups of 2+ with a hard violation — split into free
+  //              candidates, reported with the reason.
+  //   free       everyone else: solo students plus members of dissolved groups.
+  //
+  // A complete OPEN group (already at a target size, no violation) is also
+  // settled: there is nothing to add and nothing to fix.
+  pool(unitId, unit) {
     const byId = new Map();
     for (const s of this.enrollment.listWithProgress(unitId)) byId.set(s.student_id, s);
+    const shape = (m, fromTeam) => {
+      const full = byId.get(m.student_id) || {};
+      return {
+        student_id: m.student_id,
+        name: full.name || m.name || m.student_id,
+        preferred_role: (full.preferred_role || '').trim(),
+        interests: csvSet(full.project_interests),
+        slots: slotsOf(full),
+        is_new_to_qut: (full.is_new_to_qut == 1) ? 1 : 0,
+        from_team: fromTeam,
+      };
+    };
 
-    const candidates = [];
-    for (const g of stuck) {
-      for (const m of g.members) {
-        const full = byId.get(m.student_id) || {};
-        candidates.push({
-          student_id: m.student_id,
-          name: full.name || m.name || m.student_id,
-          preferred_role: (full.preferred_role || '').trim(),
-          interests: csvSet(full.project_interests),
-          slots: slotsOf(full),
-          is_new_to_qut: (full.is_new_to_qut == 1) ? 1 : 0,
-          from_team: g.team.team_name,
-        });
+    const settled = [], seeds = [], dissolved = [], free = [];
+    for (const team of this.teams.listWithMembersDetailed(unitId)) {
+      const accepted = team.members.filter(m => m.status === 'ACCEPTED');
+      if (!accepted.length) continue;
+      const validation = validateTeam(team.members, unit, { includeAllAccepted: true, tutorialFallback: true });
+
+      if (team.status === 'FINALISED' ||
+          (validation.sizeState === 'COMPLETE' && !validation.violations.length)) {
+        settled.push({ team, members: accepted });
+        continue;
       }
+
+      const guard = this._isProtected(team, unit);
+      if (guard.protected) {
+        seeds.push({ team, members: accepted.map(m => shape(m, team.team_name)) });
+        continue;
+      }
+      if (accepted.length >= 2) dissolved.push({ team, reason: guard.reason });
+      for (const m of accepted) free.push(shape(m, team.team_name));
     }
-    candidates.sort((a, b) => a.student_id.localeCompare(b.student_id));
-    return { candidates, settled, dissolving: stuck.map(g => g.team) };
+
+    // Deterministic: seeds largest first then by creation order; free by id.
+    seeds.sort((a, b) => (b.members.length - a.members.length) ||
+                         ((a.team.team_number || 0) - (b.team.team_number || 0)));
+    free.sort((a, b) => a.student_id.localeCompare(b.student_id));
+    return { settled, seeds, dissolved, free };
   }
 
   // How well `c` fits the team built so far. Higher is better; null means the
@@ -121,17 +156,15 @@ class MatchingService {
     if (!isLocked(unit))
       throw new ServiceError('Suggestions unlock once the deadline has passed', 409);
 
-    const { candidates, settled, dissolving } = this.pool(unitId, unit);
+    const { settled, seeds, dissolved, free } = this.pool(unitId, unit);
     const sizes = (parseTeamSizesCsv(unit.valid_team_sizes) || [4]).slice().sort((a, b) => a - b);
     const target = sizes[sizes.length - 1];      // aim for the largest legal team
     const minSize = sizes[0];
 
-    const remaining = [...candidates];
-    const built = [];
-
-    while (remaining.length) {
-      // Seed with the next student in stable order, then grow greedily.
-      const team = [remaining.shift()];
+    const remaining = [...free];
+    // Grow `team` greedily from `remaining` until it reaches `target` or nobody
+    // may legally join.
+    const grow = team => {
       while (team.length < target && remaining.length) {
         let bestIdx = -1, bestScore = -Infinity;
         for (let i = 0; i < remaining.length; i++) {
@@ -139,36 +172,56 @@ class MatchingService {
           if (s === null) continue;
           if (s > bestScore) { bestScore = s; bestIdx = i; }
         }
-        if (bestIdx === -1) break;              // nobody may legally join
+        if (bestIdx === -1) break;
         team.push(remaining.splice(bestIdx, 1)[0]);
       }
-      built.push(team);
-    }
+      return team;
+    };
 
-    // A trailing group too small to be legal is offered as unassigned rather
-    // than presented as a team the teacher cannot approve.
+    // Seeds first: a recorded pair is topped up, never rebuilt. A seed that
+    // cannot be filled is still emitted as a team — the students' mutual
+    // preference stands whether or not the matcher found company for it.
+    const built = seeds.map(x => ({ members: grow([...x.members]), seed: x.team }));
+
+    // Then everyone still free, grown from the next student in stable order.
+    while (remaining.length) built.push({ members: grow([remaining.shift()]), seed: null });
+
+    // A trailing group of free students too small to be legal is offered as
+    // unassigned rather than presented as a team the teacher cannot approve.
+    // Seeds are exempt: they are never dissolved into the unassigned pool.
     const teams = [];
     let unassigned = [];
     for (const t of built) {
-      if (t.length >= minSize) teams.push(t);
-      else unassigned = unassigned.concat(t);
+      if (t.seed || t.members.length >= minSize) teams.push(t);
+      else unassigned = unassigned.concat(t.members);
     }
 
     return {
       locked: true,
       // Why anyone was left over. Without this a teacher whose constraints
       // cannot be satisfied just sees an empty result and assumes it is broken.
-      unassigned_reason: this._whyUnassigned(unassigned, candidates, unit, minSize),
+      unassigned_reason: this._whyUnassigned(unassigned, free, unit, minSize),
       valid_team_sizes: unit.valid_team_sizes,
       must_share_tutorial: !!unit.must_share_tutorial,
       max_new_to_qut: unit.max_new_to_qut,
-      teams: teams.map((members, i) => this._describe(members, unit, i)),
+      teams: teams.map((t, i) => ({
+        ...this._describe(t.members, unit, i),
+        // The page draws these as one locked block and finaliseTeams refuses to
+        // split them — so the two can never disagree about what is protected.
+        seed_team_id:      t.seed?.team_id   || null,
+        seed_team_name:    t.seed?.team_name || null,
+        locked_member_ids: t.seed ? seeds.find(x => x.team === t.seed).members.map(m => m.student_id) : [],
+      })),
       unassigned: unassigned.map(m => this._member(m)),
       settled: settled.map(g => ({
         team_id: g.team.team_id, team_name: g.team.team_name, status: g.team.status,
         members: g.members.map(m => ({ student_id: m.student_id, name: m.name })),
       })),
-      dissolving: dissolving.map(t => ({ team_id: t.team_id, team_name: t.team_name })),
+      // Groups that were split, and the rule that made them unrecordable. Named
+      // so the coordinator knows it was deliberate and can chase the fix.
+      dissolved: dissolved.map(d => ({
+        team_id: d.team.team_id, team_name: d.team.team_name, reason: d.reason,
+      })),
     };
   }
 
@@ -178,11 +231,11 @@ class MatchingService {
   // things.
   //
   // Candidates are TEAMS, not individuals. Every student is eager-assigned a
-  // team-of-one and joining is a vote-gated merge of two whole teams, so merging
-  // with someone in a team of three brings all three. Ranking individuals would
-  // happily suggest a merge that overflows the unit's size rule.
+  // team-of-one and teaming up joins two whole teams, so teaming up with someone
+  // in a team of three brings all three. Ranking individuals would happily
+  // suggest a team-up that overflows the unit's size rule.
   //
-  // This recommends only — it never sends a proposal. The student picks.
+  // This recommends only — it never sends a request. The student picks.
   suggestForStudent(unitId, studentId) {
     const unit = this.units.findById(unitId);          // NOT findOwned: the caller is a student
     if (!unit) throw new ServiceError('Unit not found', 404);
@@ -207,12 +260,12 @@ class MatchingService {
     const myMembers = this.teams.getMembersDetailed(unitId, mine.team_id)
       .filter(m => m.status === 'ACCEPTED').map(m => shape(m));
 
-    // Only FORMING teams other than my own — exactly what createProposal accepts,
-    // so nothing we suggest can be rejected the moment the student clicks it.
+    // Only teams that are not finalised, other than my own — what sendRequest
+    // accepts, so nothing we suggest is refused the moment the student clicks it.
     const groups = new Map();
     for (const c of this.enrollment.listClassmates(unitId, studentId)) {
       if (!c.team_id || c.team_id === mine.team_id) continue;
-      if (c.team_status !== 'FORMING') continue;
+      if (c.team_status === 'FINALISED') continue;
       if (!groups.has(c.team_id)) groups.set(c.team_id, []);
       groups.get(c.team_id).push(shape(c, c));
     }
@@ -250,14 +303,14 @@ class MatchingService {
         members: members.map(m => ({
           student_id: m.student_id, name: m.name, preferred_role: m.preferred_role,
         })),
-        mergedSize: merged.length,
+        combinedSize: merged.length,
         sizeValid: validation.sizeValid,
         score: total,
         reasons: this._matchReasons(myMembers, members, validation, merged.length, sizes),
       });
     }
 
-    // A merge that completes a legal team wins over a merely higher-scoring one:
+    // A team-up that completes a legal team wins over a merely higher-scoring one:
     // reaching a valid size is the point of the exercise. Intermediate merges are
     // still offered below, or a solo student in a 4/5 unit could only ever match a
     // team of exactly 3 or 4 — useless while everyone is still solo.
@@ -277,7 +330,7 @@ class MatchingService {
 
   // Plain English for the same signals that produced the score, derived from them
   // rather than restated, so the explanation cannot drift from the ranking.
-  _matchReasons(myMembers, theirMembers, validation, mergedSize, sizes) {
+  _matchReasons(myMembers, theirMembers, validation, combinedSize, sizes) {
     const out = [];
     out.push(validation.sharedTutorials.length
       ? `Shares ${validation.sharedTutorials.join(', ')}`
@@ -298,15 +351,15 @@ class MatchingService {
     out.push(shared ? `${shared} shared interest${shared === 1 ? '' : 's'}` : 'No shared interests');
 
     out.push(validation.sizeValid
-      ? `Makes a complete team of ${mergedSize}`
-      : `Team of ${mergedSize} — still needs ${Math.min(...sizes.filter(s => s > mergedSize)) - mergedSize || 0} more`);
+      ? `Makes a complete team of ${combinedSize}`
+      : `Team of ${combinedSize} — still needs ${Math.min(...sizes.filter(s => s > combinedSize)) - combinedSize || 0} more`);
     return out;
   }
 
   _whyNoMatch(groupCount, myMembers, unit, maxSize) {
     if (groupCount === 0)
       return 'Nobody else in this unit is currently open to merging — everyone is either on your ' +
-             'team already or has submitted theirs.';
+             'team already or has been finalised.';
     if (unit.must_share_tutorial)
       return 'This unit requires every team to share a tutorial slot, and no open team shares one ' +
              'with yours. Check your tutorial times on the Preferences page.';
@@ -385,81 +438,6 @@ class MatchingService {
     };
   }
 
-  // ── Apply ───────────────────────────────────────────────────────────────────
-  // The teacher is the authority here: a grouping that breaks the unit's size
-  // rule is accepted (coordinators genuinely need a team of 3 when the numbers
-  // do not divide) — the UI flags it before this is called. What is NOT
-  // negotiable is integrity: every student must be enrolled and appear once.
-  // Applied teams are always approved. This only runs once the unit is locked,
-  // and a locked unit blocks submitTeam — so a team left FORMING here would be
-  // unreachable for everyone: students cannot submit it and the teacher's review
-  // screen only offered actions on SUBMITTED teams. There is no unapproved path.
-  applyTeams(unitId, teacherId, groups) {
-    const unit = this._unitOr404(unitId, teacherId);
-    if (!isLocked(unit))
-      throw new ServiceError('Teams can only be organised after the deadline has passed', 403);
-    if (!Array.isArray(groups) || !groups.length)
-      throw new ServiceError('Provide at least one team', 400);
-
-    const enrolled = new Set(this.enrollment.listWithProgress(unitId).map(s => s.student_id));
-    const seen = new Set();
-    const clean = [];
-    for (const g of groups) {
-      if (!Array.isArray(g) || !g.length) continue;
-      const ids = [];
-      for (const sid of g) {
-        if (!enrolled.has(sid)) throw new ServiceError(`${sid} is not enrolled in this unit`, 400);
-        if (seen.has(sid)) throw new ServiceError(`${sid} appears in more than one team`, 400);
-        seen.add(sid);
-        ids.push(sid);
-      }
-      clean.push(ids);
-    }
-    if (!clean.length) throw new ServiceError('Provide at least one team', 400);
-
-    // Only teams the payload actually touches are dissolved; approved teams and
-    // anyone left out are untouched.
-    const affected = new Set();
-    for (const sid of seen) {
-      const m = this.teams.findStudentTeam(unitId, sid);
-      if (m) affected.add(m.team_id);
-    }
-
-    const now = new Date().toISOString();
-    const created = [];
-
-    // Empty the teams being reshuffled first, so a student is never briefly a
-    // member of two teams.
-    for (const teamId of affected) {
-      const t = this.teams.findById(teamId);
-      if (!t || t.status === 'APPROVED') continue;
-      for (const m of this.teams.getMembers(teamId)) this.teams.removeMember(teamId, m.student_id);
-    }
-
-    for (const ids of clean) {
-      const number = this.teams.nextTeamNumber(unitId);
-      const teamId = crypto.randomUUID();
-      this.teams.create(teamId, unitId, `Team ${number}`, number, ids[0]);
-      for (const sid of ids) {
-        this.teams.addMember(teamId, sid, this.prefs.getPreferredRole(unitId, sid));
-        // Every progress mark* is a bare UPDATE that silently does nothing when
-        // the row is missing. joinUnit normally creates it, but relying on that
-        // would mean a teacher could "approve" someone and have it not stick.
-        this.progress.ensure(unitId, sid);
-        this.progress.markInTeam(unitId, sid);
-        this.progress.markSubmitted(unitId, sid);
-        this.progress.markTeacherApproved(unitId, sid);
-      }
-      this.teams.markSubmitted(teamId, now);        // records submitted_at
-      this.teams.setStatus(teamId, 'APPROVED');
-      created.push({ team_id: teamId, team_name: `Team ${number}`, members: ids });
-    }
-
-    // Teams left with nobody after the reshuffle are removed, not left as ghosts.
-    for (const teamId of affected) this.teams.deleteIfEmpty(teamId);
-
-    return { ok: true, approved: true, teams: created };
-  }
 }
 
 module.exports = MatchingService;

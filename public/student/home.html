@@ -146,12 +146,11 @@
             const members = `${size} member${size === 1 ? '' : 's'}`;
             // Same vocabulary the dashboard uses, so one state never reads as two
             // different things across pages.
-            value = u.team_status === 'APPROVED'  ? `${u.team_name} · Approved`
-                  : u.team_status === 'SUBMITTED' ? `${u.team_name} · Submitted`
+            value = u.team_status === 'FINALISED' ? `${u.team_name} · Finalised`
                   : `${u.team_name} · ${members}`;
-            sub = u.team_status === 'APPROVED'  ? 'Approved by your teacher.'
-                : u.team_status === 'SUBMITTED' ? `${members} · awaiting teacher review`
-                : 'Still forming — you can add or change teammates.';
+            sub = u.team_status === 'FINALISED' ? 'Finalised by your coordinator.'
+                : size >= 2 ? 'Your group is recorded — you can still change it until the deadline.'
+                : 'On your own — ask someone to team up, or declare no preference.';
         }
         return `
           <div class="sh-meta">
@@ -165,8 +164,8 @@
         const steps = [
             ['Rules',      u.read_rules],
             ['Preferences', u.entered_preferences],
-            ['Team',       u.in_team],
-            ['Submitted',  u.submitted_request],
+            ['Team',       Number(u.team_size) >= 2 || u.team_status === 'FINALISED'],
+            ['Finalised',  u.team_status === 'FINALISED'],
         ];
         return `<div class="sh-steps">${steps.map(([name, done]) => `
             <div class="sh-step${done ? ' done' : ''}">

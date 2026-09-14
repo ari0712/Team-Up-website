@@ -162,15 +162,13 @@
         return trimmed && trimmed !== 'None' ? trimmed : fallback;
     };
 
-    // Returns HTML, not text — the id is toned down so the name stays dominant.
-    // `users.student_id` is blank for accounts that signed up before it existed,
-    // and the username is the student id in that case (as my-team.html assumes).
-    // When the id and the name are the same string, showing both reads as a stutter.
+    // Returns HTML, not text — the email is toned down so the name stays
+    // dominant. This is your own page, so your own address is fine here; the
+    // student number is never shown anywhere in the app.
     function formatStudentHeading(user) {
         const name = user.displayName || user.username || 'Student';
-        const studentNumber = user.studentId || user.student_id || user.username || '';
-        return escapeHtml(name) + (studentNumber && studentNumber !== name
-            ? `<span class="profile-id"> – Student ID: ${escapeHtml(studentNumber)}</span>`
+        return escapeHtml(name) + (user.email
+            ? `<span class="profile-id"> – ${escapeHtml(user.email)}</span>`
             : '');
     }
 

@@ -22,6 +22,11 @@
             display: flex;
             flex-direction: column;
         }
+        .cl-chip { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; margin-bottom:8px; }
+        .cl-chip-GROUPED { background:#eefaee; color:#0a7d0a; }
+        .cl-chip-FINALISED { background:#eff4ff; color:#1a2a4a; }
+        .cl-chip-DECLARED { background:#eff4ff; color:#2663ff; }
+        .cl-chip-SILENT { background:#fdecee; color:#a8253a; }
         .cl-student-name {
             font-size: 16px;
             font-weight: 800;
@@ -156,14 +161,15 @@
     <main class="t-dash-content">
         <div class="cl-search-row">
             <input id="search-input" class="cl-search-input" type="text"
-                   placeholder="Search by name, username or student ID…" oninput="applyFilters()">
+                   placeholder="Search by name or email…" oninput="applyFilters()">
             <select id="filter-stage" class="cl-filter-select" onchange="applyFilters()">
                 <option value="">All students</option>
+                <option value="placement:SILENT">No activity recorded</option>
+                <option value="placement:DECLARED">Declared no preference</option>
+                <option value="placement:GROUPED">Grouped</option>
+                <option value="finalised">Finalised</option>
                 <option value="read_rules">Read rules</option>
                 <option value="entered_preferences">Entered preferences</option>
-                <option value="in_team">In a team</option>
-                <option value="submitted_request">Submitted request</option>
-                <option value="teacher_approved">Teacher approved</option>
             </select>
         </div>
 
@@ -229,12 +235,13 @@
     const PAGE_SIZE = 8;
     let allStudents = [], filteredStudents = [], currentPage = 1;
 
+    // Two stages the student does; two the server derives (grouped or
+    // declared from their team, finalised from your allocation).
     const STAGES = [
         { key: 'read_rules',          label: 'Read rules' },
         { key: 'entered_preferences', label: 'Enter preferences' },
-        { key: 'in_team',             label: 'Build or join team' },
-        { key: 'submitted_request',   label: 'Submit team request' },
-        { key: 'teacher_approved',    label: 'Teacher review' },
+        { key: 'grouped',             label: 'Grouped or declared' },
+        { key: 'finalised',           label: 'Finalised' },
     ];
 
     (async () => {
@@ -364,7 +371,15 @@
         try {
             allStudents = await get(`/api/units/${unitId}/class-list`);
             filteredStudents = [...allStudents];
-            renderPage();
+            // A notification can deep-link straight to one category
+            // (…&placement=SILENT), so the list opens already narrowed.
+            const wanted = new URLSearchParams(location.search).get('placement');
+            if (wanted && PLACEMENT_LABELS[wanted]) {
+                document.getElementById('filter-stage').value = `placement:${wanted}`;
+                applyFilters();
+            } else {
+                renderPage();
+            }
             renderSummary();
         } catch(e) {
             document.getElementById('student-grid').innerHTML =
@@ -372,19 +387,16 @@
         }
     }
 
-    // The student number from the account or roster; falls back to the username,
-    // which is what identifies accounts that never got a number recorded.
-    const studentNumberOf = s => s.student_number || s.student_id || '';
-
     function applyFilters() {
         const search = document.getElementById('search-input').value.toLowerCase();
         const stage  = document.getElementById('filter-stage').value;
         filteredStudents = allStudents.filter(s => {
-            // student_id is the username; student_number is the n-number. The
-            // box offers both, so both are matched.
-            const match = [s.name, s.student_id, s.student_number]
+            // Name and email: the two identifiers a coordinator has for a student.
+            // The student number is only ever in the opt-in export.
+            const match = [s.name, s.email]
                 .some(v => (v || '').toLowerCase().includes(search));
-            const stageMatch = !stage || s[stage] == 1;
+            const stageMatch = !stage
+                || (stage.startsWith('placement:') ? s.placement === stage.slice('placement:'.length) : s[stage] == 1);
             return match && stageMatch;
         });
         currentPage = 1;
@@ -405,7 +417,7 @@
         grid.innerHTML = page.map(s => {
             const rows = STAGES.map(st => {
                 const done   = s[st.key] == 1;
-                const locked = st.key === 'teacher_approved' && !s.submitted_request;
+                const locked = st.key === 'finalised' && !s.grouped;
                 const dotCls = locked ? 'cl-dot-gray' : (done ? 'cl-dot-green' : 'cl-dot-red');
                 return `<div class="cl-stage-row">
                     <div class="cl-dot ${dotCls}"></div>
@@ -415,6 +427,7 @@
             return `
             <div class="cl-student-card">
                 <div class="cl-student-name">${s.name || s.student_id}</div>
+                ${placementChip(s)}
                 ${rows}
                 <button class="cl-profile-btn" onclick='viewProfile(${JSON.stringify(s)})'>View Profile</button>
             </div>`;
@@ -449,17 +462,23 @@
         document.getElementById('summary-rows').innerHTML = rows;
     }
 
+    // Where the student stands in team formation — the same four categories
+    // the export and the notifications use (utils/placement.js on the server).
+    const PLACEMENT_LABELS = {
+        GROUPED: 'Grouped', DECLARED: 'Declared no preference', SILENT: 'No activity recorded'
+    };
+    function placementChip(s) {
+        if (!s.placement) return '';
+        const detail = s.placement === 'GROUPED' ? ` · ${escapeHtml(s.team_name || '')} (${s.team_size})` : '';
+        const fin = s.team_status === 'FINALISED' ? ` <span class="cl-chip cl-chip-FINALISED">Finalised</span>` : '';
+        return `<span class="cl-chip cl-chip-${s.placement}">${PLACEMENT_LABELS[s.placement]}${detail}</span>${fin}`;
+    }
+
     function viewProfile(s) {
         document.getElementById('modal-body').innerHTML = `
             <h3>${escapeHtml(s.name || s.student_id)}</h3>
-            <p style="font-size:13px;color:#888;margin-bottom:14px">
-                Student ID: ${escapeHtml(studentNumberOf(s))}${
-                    // Only worth showing when it differs — otherwise it stutters
-                    // ("Student ID: ari · username: ari").
-                    studentNumberOf(s) !== s.student_id
-                        ? `<span style="color:#aaa"> &middot; username: ${escapeHtml(s.student_id)}</span>`
-                        : ''}
-            </p>
+            ${placementChip(s)}
+            <p style="font-size:13px;color:#888;margin-bottom:14px">${escapeHtml(s.email || '')}</p>
             <div class="cl-modal-field"><strong>Tutorial time:</strong> ${s.tutorial_time || s.tutorial_slots || '—'}</div>
             <div class="cl-modal-field"><strong>Degree:</strong> ${s.degree || '—'}</div>
             <div class="cl-modal-field"><strong>Major:</strong> ${s.major || '—'}</div>
@@ -470,7 +489,7 @@
             <div style="margin-top:16px">
                 ${STAGES.map(st => {
             const done   = s[st.key] == 1;
-            const locked = st.key === 'teacher_approved' && !s.submitted_request;
+            const locked = st.key === 'finalised' && !s.grouped;
             const dotCls = locked ? 'cl-dot-gray' : (done ? 'cl-dot-green' : 'cl-dot-red');
             return `<div class="cl-stage-row">
                         <div class="cl-dot ${dotCls}"></div>

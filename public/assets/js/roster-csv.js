@@ -90,7 +90,7 @@ function parseRosterCsv(text) {
 function rosterParseSummary(r) {
     if (r.error) return r.error;
     const notes = [];
-    if (r.duplicate) notes.push(`${r.duplicate} duplicate${r.duplicate !== 1 ? 's' : ''} merged`);
+    if (r.duplicate) notes.push(`${r.duplicate} duplicate${r.duplicate !== 1 ? 's' : ''} skipped`);
     if (r.invalid)   notes.push(`${r.invalid} invalid skipped`);
     return `${r.loaded} student${r.loaded !== 1 ? 's' : ''} loaded` +
            (notes.length ? ` (${notes.join(', ')})` : '');

@@ -1,8 +1,14 @@
 const BaseRepository = require('./BaseRepository');
 
-// Stages a student may toggle directly. teacher_approved is intentionally
-// excluded — it is only set by teacher review flows.
-const TOGGLEABLE_STAGES = ['read_rules', 'entered_preferences', 'in_team', 'submitted_request'];
+// The two stages a student performs themselves and that nothing else can
+// derive: reading the rules and saving preferences. The team stages —
+// grouped / declared, finalised — are DERIVED at read time from placement and
+// the team's status (see UnitService._classListWithPlacement and
+// StudentPortalService.getProgress), never stored, so they cannot drift.
+//
+// `in_team`, `submitted_request` and `teacher_approved` are legacy columns from
+// the teacher-approval era. They are no longer written or read.
+const TOGGLEABLE_STAGES = ['read_rules', 'entered_preferences'];
 
 // Data access for `student_progress`.
 class ProgressRepository extends BaseRepository {
@@ -35,38 +41,6 @@ class ProgressRepository extends BaseRepository {
   markEnteredPreferences(unitId, studentId) {
     this.run(`UPDATE student_progress SET entered_preferences = 1 WHERE unit_id = ? AND student_id = ?`,
       [unitId, studentId]);
-  }
-
-  markInTeam(unitId, studentId) {
-    this.run(`UPDATE student_progress SET in_team = 1 WHERE unit_id = ? AND student_id = ?`,
-      [unitId, studentId]);
-  }
-
-  markSubmitted(unitId, studentId) {
-    this.run(`UPDATE student_progress SET submitted_request = 1 WHERE unit_id = ? AND student_id = ?`,
-      [unitId, studentId]);
-  }
-
-  markTeacherApproved(unitId, studentId) {
-    this.run(`UPDATE student_progress SET teacher_approved = 1 WHERE unit_id = ? AND student_id = ?`,
-      [unitId, studentId]);
-  }
-
-  // Disapprove revokes the teacher's decision but leaves the team submitted, so
-  // only the approval flag is cleared — the students did submit, and that is
-  // still true. Distinct from clearSubmission, which unwinds both.
-  clearTeacherApproval(unitId, studentId) {
-    this.run(`UPDATE student_progress SET teacher_approved = 0 WHERE unit_id = ? AND student_id = ?`,
-      [unitId, studentId]);
-  }
-
-  // Reject sends a team back to FORMING — clear both flags so the UI matches.
-  clearSubmission(unitId, studentId) {
-    this.run(
-      `UPDATE student_progress SET submitted_request = 0, teacher_approved = 0
-        WHERE unit_id = ? AND student_id = ?`,
-      [unitId, studentId]
-    );
   }
 }
 
