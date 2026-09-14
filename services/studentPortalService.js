@@ -3,6 +3,7 @@ const ServiceError = require('./ServiceError');
 const { validateTeam, targetSizeLabel } = require('../utils/teamValidator');
 const { placementOf } = require('../utils/placement');
 const { matchesStudent, normalise } = require('../utils/studentSearch');
+const { CATEGORIES, CATEGORY_LABELS } = require('../utils/emailCategories');
 
 // Classmate search rate limit: per (student, unit), sliding window.
 //
@@ -29,8 +30,9 @@ const avatarStore = require('../utils/avatarStore');
 // the unit's deadline is the only thing that freezes a student's group; the
 // coordinator's FINALISED status is an override, never a required step.
 class StudentPortalService {
-  constructor({ units, enrollment, roster, progress, prefs, teams, slots, announcements, studentRepo,
-                teamRequestService, notificationService, matchingService }) {
+  constructor({ units, enrollment, roster, progress, prefs, teams, slots, studentRepo,
+                teamRequestService, notificationService, matchingService, emailPrefs = null }) {
+    this.emailPrefs = emailPrefs;
     this.notificationService = notificationService;
     this.matchingService = matchingService;
     this.roster = roster;
@@ -40,7 +42,6 @@ class StudentPortalService {
     this.prefs = prefs;
     this.teams = teams;
     this.slots = slots;
-    this.announcements = announcements;
     this.studentRepo = studentRepo;
     this.requests = teamRequestService;
   }
@@ -72,6 +73,8 @@ class StudentPortalService {
     this.enrollment.enrollFromRoster(unitId, studentId, entry, displayName);
     this.progress.ensure(unitId, studentId);
     this.createTeamOfOne(unitId, studentId); // every enrolled student is always on a team
+    // From this moment their notifications are live; anything older is history.
+    this.notificationService.seedStudent(unitId, studentId);
 
     return { ok: true, alreadyJoined: false };
   }
@@ -82,12 +85,6 @@ class StudentPortalService {
     const unit = this.units.findById(unitId);
     if (!unit) throw new ServiceError('Unit not found', 404);
     return unit;
-  }
-
-  getAnnouncements(unitId, studentId) {
-    if (!this.enrollment.isEnrolled(unitId, studentId))
-      throw new ServiceError('NOT_JOINED', 403);
-    return this.announcements.listForStudent(unitId);
   }
 
   // Every per-unit read and write goes through this. requireStudent only proves
@@ -169,7 +166,8 @@ class StudentPortalService {
       // Your own address, never a classmate's: a classmate's email reaches a
       // viewer through exactly one path — the shared-name case on the Find
       // Teammates card. The student number is never returned here.
-      ...(isSelf ? { email: account?.email || '' } : {}),
+      ...(isSelf ? { email: account?.email || '' } : {}),
+
       avatarPath: account?.avatarPath || '',
       preferredRole: prefs.preferred_role || '',
       tutorialSlots: prefs.tutorial_slots || '',
@@ -435,6 +433,12 @@ class StudentPortalService {
     const result = this.requests.sendRequest({
       unitId, sourceTeamId: callerTeam.team_id, targetTeamId, initiatorId: studentId,
     });
+    // Produce now, not on the next timer tick: the recipient's "new request"
+    // row exists immediately, and a request born with under a day of runway
+    // gets its expiry warning at once. Idempotent, so the timer re-running it
+    // changes nothing.
+    try { this.notificationService.syncRequest(unitId, result.requestId); }
+    catch (e) { console.error('Notification sync after request failed:', e.message); }
     return { requestId: result.requestId, state: result.state };
   }
 
@@ -466,6 +470,41 @@ class StudentPortalService {
     if (isLocked(unit)) {
       throw new ServiceError('DEADLINE_PASSED', 403, 'DEADLINE_PASSED');
     }
+  }
+
+  // ── Email preferences (per unit, per category) ───────────────────────────────
+  getEmailPrefs(unitId, studentId) {
+    this._assertEnrolled(unitId, studentId);
+    const account = this.studentRepo.findByUsername(studentId);
+    const master = this.notificationService.getPrefs(studentId);
+    return {
+      categories: this.emailPrefs.get(studentId, unitId),
+      labels: CATEGORY_LABELS,
+      emailEnabled: master.emailEnabled,
+      deliveringTo: master.deliveringTo || account?.email || ''
+    };
+  }
+
+  saveEmailPrefs(unitId, studentId, body = {}) {
+    this._assertEnrolled(unitId, studentId);
+    const at = new Date().toISOString();
+    for (const c of CATEGORIES) {
+      if (body[c] === undefined) continue;
+      this.emailPrefs.set(studentId, unitId, c, !!body[c], at);
+    }
+    return this.getEmailPrefs(unitId, studentId);
+  }
+
+  // The unsubscribe link: token instead of a login. Returns what was switched
+  // off, or null for a token that matches nobody (the page says "link not
+  // valid" either way and never reveals whether the token existed).
+  unsubscribeByToken(token, unitId, category) {
+    if (!CATEGORIES.includes(category)) return null;
+    const owner = this.notificationService.findUserByUnsubscribeToken(token);
+    if (!owner) return null;
+    if (!this.enrollment.isEnrolled(unitId, owner.username)) return null;
+    this.emailPrefs.set(owner.username, unitId, category, false, new Date().toISOString());
+    return { unitId, category, label: CATEGORY_LABELS[category] };
   }
 
   // ── Notifications (delegated) ────────────────────────────────────────────────

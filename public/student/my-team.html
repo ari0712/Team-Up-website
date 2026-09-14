@@ -165,6 +165,7 @@
         const canEdit = !finalised && !locked;
 
         // ── Size row: advisory unless over the maximum ──
+        const sizeKind = v.sizeState === 'COMPLETE' ? 'ok' : v.sizeState === 'OVER_MAX' ? 'bad' : 'info';
         const sizeDot  = v.sizeState === 'COMPLETE' ? GREEN : v.sizeState === 'OVER_MAX' ? RED : NEUTRAL;
         const sizeText = v.sizeState === 'COMPLETE'
             ? `Team has ${members.length} student${members.length !== 1 ? 's' : ''} — complete`
@@ -179,7 +180,9 @@
             : has('NO_SHARED_TUTORIAL') ? 'No shared tutorial slot — see below'
             : 'No tutorial availability yet';
         const tutorialDot = !v.tutorialRequired ? NEUTRAL : has('NO_SHARED_TUTORIAL') ? RED : v.tutorialShared ? GREEN : NEUTRAL;
+        const tutorialKind = !v.tutorialRequired ? 'info' : has('NO_SHARED_TUTORIAL') ? 'bad' : v.tutorialShared ? 'ok' : 'info';
         const newDot = has('NEW_TO_QUT_CAP') ? RED : GREEN;
+        const newKind = has('NEW_TO_QUT_CAP') ? 'bad' : 'ok';
 
         // ── Status banners ──
         // Finalised: the coordinator has allocated this team; nothing changes now.
@@ -235,9 +238,10 @@
       </div>
       <div class="s-validation">
         <h4>Team Validation :</h4>
-        <div class="s-val-row"><div class="s-val-dot" style="background:${sizeDot}"></div> ${sizeText}</div>
-        <div class="s-val-row"><div class="s-val-dot" style="background:${tutorialDot}"></div> ${tutorialText}</div>
-        <div class="s-val-row"><div class="s-val-dot" style="background:${newDot}"></div> New-to-QUT students: ${v.newToQutCount} / ${v.maxNewToQut}</div>
+        <div class="s-val-row"><div class="s-val-dot" style="background:${sizeDot}"></div> ${statusMark(sizeKind)} ${sizeText}</div>
+        <div class="s-val-row"><div class="s-val-dot" style="background:${tutorialDot}"></div> ${statusMark(tutorialKind)} ${tutorialText}</div>
+        <div class="s-val-row"><div class="s-val-dot" style="background:${newDot}"></div> ${statusMark(newKind)} New-to-QUT students: ${v.newToQutCount} / ${v.maxNewToQut}</div>
+        ${markLegend(['ok', 'bad', 'info'])}
       </div>
       ${recordedNote}
       ${canEdit && has('NO_SHARED_TUTORIAL') ? tutorialAdviceHtml(members) : ''}

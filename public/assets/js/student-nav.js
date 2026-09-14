@@ -2,8 +2,6 @@ const STUDENT_NAV_ITEMS = [
     { key: 'home',           label: 'Home',           href: '/student/home.html',             noUnit: true },
     { key: 'dashboard',      label: 'Dashboard',      href: '/student/dashboard.html' },
     { key: 'notifications',  label: 'Notifications',  href: '/student/notifications.html', badge: true },
-    { key: 'announcements',  label: 'Announcements',  href: '/student/announcements.html' },
-    { key: 'forum',          label: 'Forum',          href: '/student/forum.html' },
     { key: 'rules',          label: 'Rules',          href: '/student/rules.html',            stage: 'read_rules' },
     { key: 'preferences',    label: 'Preferences',    href: '/student/preferences.html',      stage: 'entered_preferences' },
     { key: 'find-teammates', label: 'Find Teammates', href: '/student/find-teammates.html' },
@@ -93,13 +91,14 @@ async function initStudentNav({ activeItem, pageTitle }) {
             const isActive = item.key === activeItem;
             const isDone   = item.stage ? progress[item.stage] == 1 : null;
 
-            // Dot indicator for stages
+            // Stage indicator: a glyph, not just a colour — ✓ done, ○ not yet.
             const dot = isDone !== null ? `
-                <span style="
-                    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-                    background: ${isDone ? '#22c55e' : '#e0e8f0'};
+                <span role="img" aria-label="${isDone ? 'done' : 'not yet'}" title="${isDone ? 'Done' : 'Not yet'}" style="
+                    width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+                    background: ${isDone ? '#22c55e' : '#e0e8f0'}; color: ${isDone ? '#fff' : '#6b7a8c'};
+                    font-size: 10px; font-weight: 800; line-height: 14px; text-align: center;
                     display: inline-block; margin-left: auto;
-                "></span>` : '';
+                ">${isDone ? '✓' : '○'}</span>` : '';
 
             // Red unread count — omitted entirely at zero so it only ever
             // appears when there is something to look at.

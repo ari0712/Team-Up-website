@@ -19,11 +19,30 @@ const DEFAULTS = {
 class NotificationPrefsRepository extends BaseRepository {
   get(username) {
     const row = super.get(
-      `SELECT username, email_enabled, email_override, min_severity, updated_at
+      `SELECT username, email_enabled, email_override, min_severity, updated_at, unsubscribe_token
          FROM notification_prefs WHERE username = ?`,
       [username]
     );
-    return row || { username, ...DEFAULTS, updated_at: '' };
+    return row || { username, ...DEFAULTS, updated_at: '', unsubscribe_token: '' };
+  }
+
+  // The token the unsubscribe link carries in place of a login. Created the
+  // first time it is needed and never rotated (a rotated token would break
+  // the link in every email already sent).
+  ensureUnsubscribeToken(username) {
+    const current = this.get(username);
+    if (current.unsubscribe_token) return current.unsubscribe_token;
+    const token = require('crypto').randomBytes(24).toString('base64url');
+    if (current.updated_at === '' && !super.get(`SELECT 1 FROM notification_prefs WHERE username = ?`, [username])) {
+      this.upsert(username, { emailEnabled: true, emailOverride: '', minSeverity: 'INFO', updatedAt: new Date().toISOString() });
+    }
+    this.run(`UPDATE notification_prefs SET unsubscribe_token = ? WHERE username = ?`, [token, username]);
+    return token;
+  }
+
+  findByUnsubscribeToken(token) {
+    if (!token) return null;
+    return super.get(`SELECT username FROM notification_prefs WHERE unsubscribe_token = ?`, [token]);
   }
 
   upsert(username, p) {

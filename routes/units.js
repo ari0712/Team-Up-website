@@ -78,16 +78,6 @@ module.exports = function createUnitsRouter({ unitService, matchingService }) {
   router.get('/:unitId/export', requireTeacher, (req, res) =>
     send(res, () => res.json(svc.buildExport(req.params.unitId, username(req)))));
 
-  // ── Announcements ───────────────────────────────────────────────
-  router.get('/:unitId/announcements', requireTeacher, (req, res) =>
-    send(res, () => res.json(svc.getAnnouncements(req.params.unitId, username(req)))));
-
-  router.post('/:unitId/announcements', requireTeacher, (req, res) =>
-    send(res, () => {
-      const { title, content } = req.body || {};
-      res.json(svc.postAnnouncement(req.params.unitId, username(req), title, content));
-    }));
-
   // ── Organiser (only once the deadline has locked formation) ──
   router.get('/:unitId/suggestions', requireTeacher, (req, res) =>
     send(res, () => res.json(matchingService.suggest(req.params.unitId, username(req)))));

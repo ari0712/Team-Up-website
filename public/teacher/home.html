@@ -158,8 +158,6 @@
                 plural(i.rostered, 'roster entry', 'roster entries'),
                 plural(i.teams, 'team', 'teams'),
                 plural(i.slots, 'tutorial slot', 'tutorial slots'),
-                plural(i.announcements, 'announcement', 'announcements'),
-                plural(i.forumThreads, 'forum thread', 'forum threads'),
             ];
             document.getElementById('du-impact').innerHTML =
                 lines.map(l => `<li>${l}</li>`).join('') +
@@ -168,7 +166,7 @@
             // Not knowing the counts must not block the delete itself — the
             // typed confirmation is the real safeguard.
             document.getElementById('du-impact').innerHTML =
-                '<li>every student, team, preference, announcement and forum thread in this unit</li>';
+                '<li>every student, team and preference in this unit</li>';
         }
     }
 

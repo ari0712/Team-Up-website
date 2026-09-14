@@ -30,9 +30,6 @@ module.exports = function createStudentRouter({ studentPortalService }) {
   router.get('/units/:unitId', (req, res) =>
     send(res, () => res.json(svc.getUnitForEnrolled(req.params.unitId, sid(req)))));
 
-  router.get('/units/:unitId/announcements', (req, res) =>
-    send(res, () => res.json(svc.getAnnouncements(req.params.unitId, sid(req)))));
-
   // ── Progress ────────────────────────────────────────────────────
   router.get('/units/:unitId/progress', (req, res) =>
     send(res, () => res.json(svc.getProgress(req.params.unitId, sid(req)))));
@@ -132,6 +129,13 @@ module.exports = function createStudentRouter({ studentPortalService }) {
 
   router.post('/units/:unitId/notifications/read-all', (req, res) =>
     send(res, () => res.json(svc.markAllNotificationsRead(req.params.unitId, sid(req)))));
+
+  // Which categories of event reach this student by email, for this unit.
+  router.get('/units/:unitId/email-prefs', (req, res) =>
+    send(res, () => res.json(svc.getEmailPrefs(req.params.unitId, sid(req)))));
+
+  router.put('/units/:unitId/email-prefs', (req, res) =>
+    send(res, () => res.json(svc.saveEmailPrefs(req.params.unitId, sid(req), req.body || {}))));
 
   // ── Membership mutations ────────────────────────────────────────
   router.delete('/units/:unitId/teams/:teamId/members/:studentId', (req, res) =>

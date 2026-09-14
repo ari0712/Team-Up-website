@@ -18,7 +18,6 @@
 //   proposal:<id>:<state>           that request resolved
 //   team:<id>:<status>:<timestamp>  timestamp lets a re-submit notify again
 //   deadline:<unit>:<bucket>        7d / 3d / 1d / due
-//   announcement:<id>
 // Teacher keys carry a `teacher:` prefix. They cannot collide with student keys
 // anyway — dedupe is scoped per-username and a teacher is a different user —
 // but the prefix keeps the table readable when debugging.
@@ -28,12 +27,26 @@ const ServiceError = require('./ServiceError');
 const { isDeliverable } = require('./email/transport');
 const { placementOf } = require('../utils/placement');
 const { SEVERITIES } = require('../repositories/notificationPrefsRepository');
+const { categoryOf, CATEGORY_LABELS } = require('../utils/emailCategories');
+
+// ── Email volume bounds ──────────────────────────────────────────────────────
+// One email per event per student is guaranteed by `notifications.emailed_at`
+// (stamped before the send). On top of that, no recipient gets more than this
+// many messages in a rolling day; anything past it is dropped, not deferred —
+// a "request received" email a day late is worse than none, and the in-app
+// inbox still has the row. Category defaults keep the 400-student cases
+// (deadline buckets) opt-in, so this is a backstop.
+const EMAIL_DAILY_CAP = 10;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// How close to lapsing a request is before its pending voters are warned.
+const EXPIRY_WARNING_MS = 24 * 60 * 60 * 1000;
 
 function nowIso() { return new Date().toISOString(); }
 
 // A recipient's first sync backfills existing history as already-read and
 // already-emailed. Without it, turning the feature on would show everyone a
-// badge full of old announcements and send a backlog of email. A student who
+// badge full of old events and send a backlog of email. A student who
 // joins later gets the same treatment, which is correct — they should not be
 // notified about things that happened before they arrived.
 const SEED_TYPE = 'seed';
@@ -114,17 +127,17 @@ function daysUntilDeadline(deadline) {
 }
 
 class NotificationService {
-  constructor({ db, notifications, prefs, outbox, units, enrollment, teams, announcements,
-                userRepo, transport, env = process.env }) {
+  constructor({ db, notifications, prefs, outbox, units, enrollment, teams,
+                userRepo, transport, emailPrefs = null, env = process.env }) {
     this.db = db;
     this.env = env;
+    this.emailPrefs = emailPrefs;
     this.notifications = notifications;
     this.prefs = prefs;
     this.outbox = outbox;
     this.units = units;
     this.enrollment = enrollment;
     this.teams = teams;
-    this.announcements = announcements;
     this.userRepo = userRepo;
     this.transport = transport;
   }
@@ -140,98 +153,35 @@ class NotificationService {
     const now = nowIso();
     const link = page => `/student/${page}.html?unitId=${unitId}`;
 
-    // Computed up front: hasAnyFor flips to true as soon as we insert.
-    const firstSync = new Set(
-      students.filter(s => !this.notifications.hasAnyFor(unitId, s.student_id))
-              .map(s => s.student_id)
-    );
+    // The backfill line for each student: the moment they joined the unit
+    // (seedStudent is called from joinUnit). Events that happened BEFORE it —
+    // a request that expired last month — are inserted already read and
+    // already emailed; anything from that moment on is fresh. A student
+    // without a sentinel (joined before seeding existed) is seeded now, so a
+    // backlog is never mailed to them either.
+    const seededAt = new Map(this.notifications.listSeedTimes(unitId).map(r => [r.student_id, r.created_at]));
+    for (const s of students) {
+      if (seededAt.has(s.student_id)) continue;
+      this.seedStudent(unitId, s.student_id, now);
+      seededAt.set(s.student_id, now);
+    }
 
     const add = (studentId, n) => {
-      const seeding = firstSync.has(studentId);
+      const createdAt = n.createdAt || now;
+      const backfill = Date.parse(createdAt) < Date.parse(seededAt.get(studentId) || now);
       this.notifications.insertIgnore({
         unitId, studentId, recipientRole: 'STUDENT',
         type: n.type, severity: n.severity || 'INFO',
         title: n.title, body: n.body || '', link: n.link || '',
         dedupeKey: n.dedupeKey,
-        createdAt: n.createdAt || now,
-        readAt:    seeding ? now : null,
-        emailedAt: seeding ? now : null
+        createdAt,
+        readAt:    backfill ? now : null,
+        emailedAt: backfill ? now : null
       });
     };
 
-    // A sentinel so a student with no derivable events is still "synced".
-    // Without it they would stay in firstSync forever and their first real
-    // notification would arrive pre-read. Hidden from the inbox listing.
-    for (const sid of firstSync) {
-      this.notifications.insertIgnore({
-        unitId, studentId: sid, recipientRole: 'STUDENT', type: SEED_TYPE,
-        severity: 'INFO', title: '', body: '', link: '',
-        dedupeKey: `seed:${unitId}`, createdAt: now, readAt: now, emailedAt: now
-      });
-    }
-
-    // ── Teacher announcements ──
-    for (const a of this.announcements.listForStudent(unitId)) {
-      for (const s of students) {
-        add(s.student_id, {
-          type: 'announcement',
-          title: `Announcement: ${a.title || 'Untitled'}`,
-          body: a.content || '',
-          link: link('announcements'),
-          dedupeKey: `announcement:${a.id}`,
-          createdAt: a.created_at || now
-        });
-      }
-    }
-
     // ── Team-up requests ──
-    // One query for the whole unit rather than N per-student calls.
-    const proposalRows = this.db.all(
-      `SELECT p.proposal_id, p.state, p.initiator_id, p.created_at, p.resolved_at,
-              p.invalidated_reason,
-              ts.team_name AS source_team_name, tt.team_name AS target_team_name,
-              pv.student_id, pv.vote
-         FROM proposals p
-         INNER JOIN proposal_votes pv ON pv.proposal_id = p.proposal_id
-         LEFT JOIN unit_teams ts ON ts.team_id = p.source_team_id
-         LEFT JOIN unit_teams tt ON tt.team_id = p.target_team_id
-        WHERE p.unit_id = ?`,
-      [unitId]
-    );
-    for (const r of proposalRows) {
-      const otherTeam = r.source_team_name || r.target_team_name || 'Another team';
-      if (r.state === 'open') {
-        if (r.vote === 'pending' && r.student_id !== r.initiator_id) {
-          add(r.student_id, {
-            type: 'team_request',
-            title: 'New team-up request',
-            body: `${otherTeam} wants to team up with your group. Accept or decline before it expires.`,
-            link: link('dashboard'),
-            dedupeKey: `proposal:${r.proposal_id}:open`,
-            createdAt: r.created_at || now
-          });
-        }
-        continue;
-      }
-      const resolved = {
-        approved:       ['Request accepted — you\'re now one group', 'Everyone accepted a team-up request. Your group is recorded; nothing more to do.'],
-        rejected:       ['Request declined', 'A team-up request was declined.'],
-        expired:        ['Request expired', 'A team-up request expired because not everyone responded in time.'],
-        auto_cancelled: ['Request withdrawn', 'A team-up request was withdrawn because another team-up completed first.'],
-        invalidated:    ['Request no longer valid',
-                         r.invalidated_reason ? `A team-up request can no longer go ahead: ${r.invalidated_reason}.`
-                                              : 'A team-up request can no longer go ahead because a team changed.']
-      }[r.state];
-      if (!resolved) continue;
-      add(r.student_id, {
-        type: 'team_request',
-        title: resolved[0],
-        body: resolved[1],
-        link: link('my-team'),
-        dedupeKey: `proposal:${r.proposal_id}:${r.state}`,
-        createdAt: r.resolved_at || now
-      });
-    }
+    this._produceRequests(unitId, add, link, now);
 
     // ── Coordinator overrides ──
     // The only team-status events a student can receive: the coordinator
@@ -270,6 +220,110 @@ class NotificationService {
     }
 
     return students.length;
+  }
+
+  // The team-up request rows for a unit — or for ONE request when
+  // `onlyProposalId` is given, which is what sendRequest uses to produce the
+  // recipient's "new request" (and any expiry warning) immediately without
+  // walking every student in the unit.
+  _produceRequests(unitId, add, link, now, onlyProposalId = null) {
+    const proposalRows = this.db.all(
+      `SELECT p.proposal_id, p.state, p.initiator_id, p.created_at, p.resolved_at,
+              p.invalidated_reason, p.expires_at,
+              ts.team_name AS source_team_name, tt.team_name AS target_team_name,
+              pv.student_id, pv.vote
+         FROM proposals p
+         INNER JOIN proposal_votes pv ON pv.proposal_id = p.proposal_id
+         LEFT JOIN unit_teams ts ON ts.team_id = p.source_team_id
+         LEFT JOIN unit_teams tt ON tt.team_id = p.target_team_id
+        WHERE p.unit_id = ?${onlyProposalId ? ' AND p.proposal_id = ?' : ''}`,
+      onlyProposalId ? [unitId, onlyProposalId] : [unitId]
+    );
+    for (const r of proposalRows) {
+      const otherTeam = r.source_team_name || r.target_team_name || 'Another team';
+      if (r.state === 'open') {
+        if (r.vote === 'pending' && r.student_id !== r.initiator_id) {
+          add(r.student_id, {
+            type: 'team_request',
+            title: 'New team-up request',
+            body: `${otherTeam} wants to team up with your group. Accept or decline before it expires.`,
+            link: link('dashboard'),
+            dedupeKey: `proposal:${r.proposal_id}:open`,
+            createdAt: r.created_at || now
+          });
+          // About to lapse: warn everyone who still has not answered. Once per
+          // request (no bucket in the key). Produced on the timer AND by
+          // sendRequest right after creation, so a request born with less than
+          // a day of runway is warned immediately, not a minute later.
+          const msLeft = Date.parse(r.expires_at) - Date.now();
+          if (!isNaN(msLeft) && msLeft > 0 && msLeft <= EXPIRY_WARNING_MS) {
+            const hours = Math.max(1, Math.round(msLeft / 3600000));
+            add(r.student_id, {
+              type: 'team_request', severity: 'WARNING',
+              title: `A team-up request expires in ${hours} hour${hours === 1 ? '' : 's'}`,
+              body: `${otherTeam} asked to team up with your group and nobody has answered yet. ` +
+                    `It will be declined automatically when it expires.`,
+              link: link('dashboard'),
+              dedupeKey: `proposal:${r.proposal_id}:expiring`
+            });
+          }
+        }
+        continue;
+      }
+      const resolved = {
+        approved:       ['Request accepted — you\'re now one group', 'Everyone accepted a team-up request. Your group is recorded; nothing more to do.'],
+        rejected:       ['Request declined', 'A team-up request was declined.'],
+        expired:        ['Request expired', 'A team-up request expired because not everyone responded in time.'],
+        auto_cancelled: ['Request withdrawn', 'A team-up request was withdrawn because another team-up completed first.'],
+        invalidated:    ['Request no longer valid',
+                         r.invalidated_reason ? `A team-up request can no longer go ahead: ${r.invalidated_reason}.`
+                                              : 'A team-up request can no longer go ahead because a team changed.']
+      }[r.state];
+      if (!resolved) continue;
+      add(r.student_id, {
+        type: 'team_request',
+        title: resolved[0],
+        body: resolved[1],
+        link: link('my-team'),
+        dedupeKey: `proposal:${r.proposal_id}:${r.state}`,
+        createdAt: r.resolved_at || now
+      });
+    }
+
+  }
+
+  // Produce only what one request can generate, for its voters. Called by
+  // sendRequest right after creation. Same rows, same dedupe keys as the full
+  // pass — the timer sweep re-deriving them is a no-op.
+  syncRequest(unitId, proposalId) {
+    const now = nowIso();
+    const link = page => `/student/${page}.html?unitId=${unitId}`;
+    const voters = this.db.all(`SELECT student_id FROM proposal_votes WHERE proposal_id = ?`, [proposalId]).map(r => r.student_id);
+    const seededAt = new Map(this.notifications.listSeedTimes(unitId).map(r => [r.student_id, r.created_at]));
+    for (const sid of voters) if (!seededAt.has(sid)) { this.seedStudent(unitId, sid, now); seededAt.set(sid, now); }
+    const add = (studentId, n) => {
+      const createdAt = n.createdAt || now;
+      const backfill = Date.parse(createdAt) < Date.parse(seededAt.get(studentId) || now);
+      this.notifications.insertIgnore({
+        unitId, studentId, recipientRole: 'STUDENT',
+        type: n.type, severity: n.severity || 'INFO',
+        title: n.title, body: n.body || '', link: n.link || '',
+        dedupeKey: n.dedupeKey, createdAt,
+        readAt: backfill ? now : null, emailedAt: backfill ? now : null
+      });
+    };
+    this._produceRequests(unitId, add, link, now, proposalId);
+  }
+
+  // Marks the point from which a student's notifications are live. Called on
+  // join; older events are backfilled as read + emailed, later ones are not.
+  // The sentinel row is hidden from the inbox listing.
+  seedStudent(unitId, studentId, at = nowIso()) {
+    this.notifications.insertIgnore({
+      unitId, studentId, recipientRole: 'STUDENT', type: SEED_TYPE,
+      severity: 'INFO', title: '', body: '', link: '',
+      dedupeKey: `seed:${unitId}`, createdAt: at, readAt: at, emailedAt: at
+    });
   }
 
   // ── Teacher producer ────────────────────────────────────────────────────────
@@ -456,6 +510,10 @@ class NotificationService {
     return this.getPrefs(username);
   }
 
+  findUserByUnsubscribeToken(token) {
+    return this.prefs.findByUnsubscribeToken(token);
+  }
+
   // ── Recipient guard ─────────────────────────────────────────────────────────
   // Applied to every transport, because it lives here rather than in one of
   // them. The database holds third-party addresses, so switching MAIL_TRANSPORT
@@ -474,56 +532,97 @@ class NotificationService {
 
   // ── Email dispatch ──────────────────────────────────────────────────────────
   // Runs on the timer, never inline with a request. Every notification is
-  // stamped emailed_at exactly once, whichever way it goes, so nothing is sent
-  // twice and nothing is retried forever.
+  // stamped emailed_at exactly once, whichever way it goes — and the stamp is
+  // written BEFORE the transport is called, so a crash mid-send produces a
+  // visible failed/queued outbox row rather than a duplicate email. Silent
+  // non-delivery is the better failure mode.
   //
-  // Two layers of filtering, in this order and never the other way round:
-  //   1. the RECIPIENT's preferences  — what they asked to receive
-  //   2. the OPERATOR's env guard     — what this deployment is allowed to send
-  // A user choosing an override address must not be able to reach somewhere
-  // MAIL_ALLOWLIST forbids, so their choice only ever narrows the audience or
-  // changes the intended address; it never bypasses the guard below.
+  // Gates, in order and never the other way round:
+  //   1. is this an email event at all?               (utils/emailCategories)
+  //   2. the RECIPIENT's preferences — master switch, per-unit category,
+  //      minimum severity
+  //   3. the auto_cancelled suppression (they already got the winner's email)
+  //   4. the per-recipient daily cap
+  //   5. the OPERATOR's env guard — what this deployment is allowed to send
+  // A user's choices only ever narrow the audience or change the intended
+  // address; they never bypass the operator guard.
   async dispatchEmails(limit = 100) {
     const pending = this.notifications.listPendingEmail(limit);
     const result = { sent: 0, skipped: 0, failed: 0 };
     const redirectTo = (this.env.MAIL_REDIRECT_TO || '').trim();
+    const baseUrl = (this.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+
+    // Read per-unit category prefs once per pass, not once per email.
+    const unitPrefs = new Map();
+    if (this.emailPrefs) {
+      for (const r of this.emailPrefs.listAll())
+        unitPrefs.set(`${r.username}|${r.unit_id}|${r.category}`, r.enabled ? 1 : 0);
+    }
+    const categoryOn = (username, unitId, category) => {
+      const k = `${username}|${unitId}|${category}`;
+      if (unitPrefs.has(k)) return !!unitPrefs.get(k);
+      return !!require('../utils/emailCategories').CATEGORY_DEFAULTS[category];
+    };
+    const sentToday = new Map();          // intended address → count, memoised per pass
+    const cappedWarned = new Set();
 
     for (const n of pending) {
       const at = nowIso();
       const user = this.userRepo.findByUsername(n.student_id);
       const prefs = this.prefs.get(n.student_id);
-      // The override is the address the user nominated; falling back to the
-      // one they signed up with.
       const intended = (prefs.email_override || '').trim() || (user?.email || '').trim();
+      const category = categoryOf(n);
       const subject = `[TeamUp] ${n.title}`;
-      let body = `${n.body}\n\nOpen TeamUp: ${n.link}`;
 
       const skip = reason => {
         this.outbox.queue({
           notificationId: n.id, recipient: intended, intendedRecipient: intended,
-          subject, body, status: 'skipped', error: reason, createdAt: at
+          subject, body: '', status: 'skipped', error: reason, createdAt: at
         });
         this.notifications.markEmailed(n.id, at);
         result.skipped++;
       };
 
-      // ── Layer 1: recipient preferences ──
-      if (!prefs.email_enabled) { skip('recipient disabled email notifications'); continue; }
+      // ── 1. Event gate ──
+      if (n.recipient_role !== 'TEACHER' && !category) { skip('not an email event'); continue; }
 
+      // ── 2. Recipient preferences ──
+      if (!prefs.email_enabled) { skip('recipient disabled email notifications'); continue; }
+      if (category && !categoryOn(n.student_id, n.unit_id, category)) { skip(`category off: ${category}`); continue; }
       // Unknown severities rank as INFO rather than -1, so a row written by
       // older code is never silently filtered out by a CRITICAL-only setting.
-      const rank = s => Math.max(0, SEVERITIES.indexOf(s));
-      if (rank(n.severity) < rank(prefs.min_severity)) {
-        skip('below recipient minimum severity');
-        continue;
+      const rank = sv => Math.max(0, SEVERITIES.indexOf(sv));
+      if (rank(n.severity) < rank(prefs.min_severity)) { skip('below recipient minimum severity'); continue; }
+
+      // ── 3. auto_cancelled: suppress only for someone who also won ──
+      if (category === 'requests' && String(n.dedupe_key).endsWith(':auto_cancelled')) {
+        const proposalId = String(n.dedupe_key).split(':')[1];
+        const winner = this.db.get(`SELECT superseded_by FROM proposals WHERE proposal_id = ?`, [proposalId])?.superseded_by;
+        const alsoWon = winner && this.db.get(
+          `SELECT 1 AS ok FROM proposal_votes WHERE proposal_id = ? AND student_id = ?`, [winner, n.student_id]);
+        if (alsoWon) { skip('superseded by accepted request'); continue; }
       }
 
-      // ── Layer 2: operator guard ──
-      if (!isDeliverable(intended)) { skip('recipient address is not a valid email'); continue; }
+      // ── 4. Daily cap ──
+      if (n.recipient_role !== 'TEACHER') {
+        if (!sentToday.has(intended))
+          sentToday.set(intended, this.outbox.countSentSince(intended, new Date(Date.now() - DAY_MS).toISOString()));
+        const count = sentToday.get(intended);
+        if (count >= EMAIL_DAILY_CAP) {
+          if (!cappedWarned.has(n.student_id)) {
+            cappedWarned.add(n.student_id);
+            // Username and count only — never the message.
+            console.warn('Email daily cap reached', { studentId: n.student_id, count });
+          }
+          skip('daily cap reached');
+          continue;
+        }
+      }
 
-      // Redirect wins over the allowlist: it is the blunt "nothing can escape"
-      // switch, so it must not be second-guessed by a narrower rule.
+      // ── 5. Operator guard ──
+      if (!isDeliverable(intended)) { skip('recipient address is not a valid email'); continue; }
       let recipient = intended;
+      let body = this._emailBody(n, baseUrl, category);
       if (redirectTo) {
         recipient = redirectTo;
         body = `[would have gone to ${intended}]\n\n${body}`;
@@ -532,23 +631,42 @@ class NotificationService {
         continue;
       }
 
+      // Stamp and record BEFORE sending: a crash from here on leaves a
+      // queued/failed row, never a second email.
       const outboxId = this.outbox.queue({
         notificationId: n.id, recipient, intendedRecipient: intended,
         subject, body, status: 'queued', createdAt: at
       });
+      this.notifications.markEmailed(n.id, at);
       try {
         const info = await this.transport.send({ to: recipient, subject, body });
         this.outbox.markSent(outboxId, nowIso(), info?.previewUrl || null);
+        sentToday.set(intended, (sentToday.get(intended) || 0) + 1);
         result.sent++;
       } catch (e) {
+        // Recorded, not retried: the stamp is already down, and retrying
+        // forever against an unreachable address is the worse failure.
         this.outbox.markFailed(outboxId, e.message);
         result.failed++;
       }
-      // Stamped regardless: a failure is recorded in the outbox, not retried
-      // forever against an address that may simply be unreachable.
-      this.notifications.markEmailed(n.id, at);
     }
     return result;
+  }
+
+  // Plain text. Absolute links (a relative path is useless in a mail client),
+  // and for students an unsubscribe link that needs no login plus a link to
+  // the panel with the other switches.
+  _emailBody(n, baseUrl, category) {
+    const link = n.link ? (n.link.startsWith('http') ? n.link : baseUrl + n.link) : baseUrl;
+    let body = `${n.body}\n\nOpen TeamUp: ${link}`;
+    if (category && n.recipient_role !== 'TEACHER') {
+      const token = this.prefs.ensureUnsubscribeToken(n.student_id);
+      const stop = `${baseUrl}/unsubscribe?t=${encodeURIComponent(token)}&u=${encodeURIComponent(n.unit_id)}&c=${category}`;
+      const manage = `${baseUrl}/student/notifications.html?unitId=${encodeURIComponent(n.unit_id)}`;
+      body += `\n\n—\nYou are getting this because "${CATEGORY_LABELS[category]}" is on for this unit.` +
+              `\nStop these emails: ${stop}\nManage all email settings: ${manage}`;
+    }
+    return body;
   }
 
   // Timer entry point: produce for every unit, then dispatch.
@@ -566,6 +684,8 @@ class NotificationService {
 }
 
 NotificationService.SEED_TYPE = SEED_TYPE;
+NotificationService.EMAIL_DAILY_CAP = EMAIL_DAILY_CAP;
+NotificationService.EXPIRY_WARNING_MS = EXPIRY_WARNING_MS;
 NotificationService.AT_RISK_CHOICES = AT_RISK_CHOICES;
 NotificationService.AT_RISK_DEFAULT = AT_RISK_DEFAULT;
 module.exports = NotificationService;

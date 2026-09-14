@@ -77,6 +77,15 @@ class NotificationRepository extends BaseRepository {
 
   // Everything still awaiting an email decision, newest last so a backlog is
   // dispatched in the order it happened.
+  // When each student in a unit was seeded (see NotificationService.seedStudent).
+  listSeedTimes(unitId) {
+    return this.all(
+      `SELECT student_id, created_at FROM notifications
+        WHERE unit_id = ? AND type = 'seed' AND recipient_role = 'STUDENT'`,
+      [unitId]
+    );
+  }
+
   listPendingEmail(limit = 200) {
     return this.all(
       `SELECT * FROM notifications WHERE emailed_at IS NULL ORDER BY id ASC LIMIT ?`,

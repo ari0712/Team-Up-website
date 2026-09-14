@@ -29,6 +29,16 @@ class EmailOutboxRepository extends BaseRepository {
       [String(error).slice(0, 500), id]);
   }
 
+  // Messages actually sent to this address in the last `windowMs` — the
+  // per-recipient daily cap reads this once per recipient per pass.
+  countSentSince(intendedRecipient, sinceIso) {
+    return this.get(
+      `SELECT COUNT(*) AS n FROM email_outbox
+        WHERE intended_recipient = ? AND status = 'sent' AND sent_at >= ?`,
+      [intendedRecipient, sinceIso]
+    )?.n || 0;
+  }
+
   findByNotification(notificationId) {
     return this.all(`SELECT * FROM email_outbox WHERE notification_id = ?`, [notificationId]);
   }

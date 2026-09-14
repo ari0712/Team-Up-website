@@ -44,7 +44,7 @@ describe('performance — semester-scale fixture', () => {
   });
   after(() => h.close());
 
-  test('print wall time and statement counts', () => {
+  test('print wall time and statement counts', async () => {
     const rows = [];
     const time = (label, fn) => { const r = h.measure(label, fn); rows.push(r); return r.result; };
 
@@ -66,6 +66,24 @@ describe('performance — semester-scale fixture', () => {
     time('syncTeacherForUnit', () => h.notificationService.syncTeacherForUnit(unitId));
     time('suggest',            () => h.matchingService.suggest(unitId, teacher));
 
+    // Email at scale: every student opts in to deadline reminders, the unit
+    // deadline sits inside a bucket, and one producer pass + one dispatch pass
+    // must send to all of them. The statement count per email is inherent
+    // (outbox row, stamp, mark sent) — the thing to watch is that nothing
+    // else scales with the class size.
+    const at = new Date().toISOString();
+    for (const s of h.unitService.getClassList(unitId, teacher))
+      h.repos.emailPrefs.set(s.student_id, unitId, 'deadline', true, at);
+    // Deadline is already PAST (set above) → the 'due' bucket applies to everyone.
+    time('syncForUnit (deadline bucket)', () => h.notificationService.syncForUnit(unitId));
+    let sendResult;
+    const es = h.measure('dispatchEmails (400 cap)', () => null);   // placeholder for ordering
+    const t1 = performance.now(); const b1 = h.statements.n;
+    sendResult = await h.notificationService.dispatchEmails(400);
+    rows.push({ label: 'dispatchEmails (400 cap)', ms: performance.now() - t1, statements: h.statements.n - b1, result: sendResult });
+    void es;
+    console.log(`  emails: sent=${sendResult.sent} skipped=${sendResult.skipped} failed=${sendResult.failed}`);
+
     // The boot re-validation pass, standalone against this fixture.
     const migrator = new SchemaMigrator(h.db.raw);
     const before = h.statements.n;
@@ -81,6 +99,6 @@ describe('performance — semester-scale fixture', () => {
     for (const r of rows)
       console.log('  ' + r.label.padEnd(36) + r.ms.toFixed(1).padStart(9) + '   ' + r.statements);
     console.log('');
-    assert.ok(rows.length === 9);
+    assert.ok(rows.length === 11);
   });
 });

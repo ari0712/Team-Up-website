@@ -108,7 +108,7 @@ class TeamRequestService {
   // The preconditions for a merge, as data instead of as a throw.
   //
   // sendRequest calls this first and is the only thing that writes, so a UI
-  // asking "could I ask to join that team?" — the forum's recruiting cards — is
+  // asking "could I ask to join that team?" before offering the button is
   // answered by these exact rules rather than by a second copy of them that
   // drifts the first time one of them changes.
   //
@@ -190,7 +190,14 @@ class TeamRequestService {
 
     const proposalId = crypto.randomUUID();
     const now = nowIso();
-    const expiresAt = new Date(Date.now() + REQUEST_TIMEOUT_MS).toISOString();
+    // 48 h, or the unit's deadline if that comes first: a request sent 10 h
+    // before the deadline is dead at the deadline, and the "expires in N hours"
+    // warning must say so rather than promise two days.
+    let expiresMs = Date.now() + REQUEST_TIMEOUT_MS;
+    const unitRow = this.units.findById(unitId);
+    const deadlineMs = unitRow && unitRow.deadline ? Date.parse(unitRow.deadline) : NaN;
+    if (!isNaN(deadlineMs) && deadlineMs > Date.now() && deadlineMs < expiresMs) expiresMs = deadlineMs;
+    const expiresAt = new Date(expiresMs).toISOString();
 
     this.db.tx(db => {
       db.run(
@@ -407,11 +414,14 @@ class TeamRequestService {
       if (c.source_team_id === loser || c.target_team_id === loser)
         loserMembers.forEach(id => movers.add(id));
 
+      // superseded_by names the request that won. The email dispatcher uses
+      // it to tell a student who also got the winner's "accepted" email (skip
+      // the cancellation) from one who only lost (send it).
       db.run(
         `UPDATE proposals SET state = 'auto_cancelled', resolved_at = ?,
-                cancelled_by_student_ids = ?
+                cancelled_by_student_ids = ?, superseded_by = ?
           WHERE proposal_id = ?`,
-        [now, [...movers].join(','), c.proposal_id]
+        [now, [...movers].join(','), proposalId, c.proposal_id]
       );
       db.run(`UPDATE proposal_votes SET seen_at = NULL WHERE proposal_id = ?`, [c.proposal_id]);
     }

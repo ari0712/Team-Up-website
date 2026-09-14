@@ -71,6 +71,17 @@
             </div>
             <div id="notes-list"><p style="color:#888;font-size:14px">Loading…</p></div>
         </div>
+
+        <!-- Email is a delivery channel for the same events. Per unit, per
+             category; the defaults are on for requests and your team, off for
+             the informational ones. Every email also carries a one-click
+             unsubscribe for its category. -->
+        <div class="s-card" id="email-card">
+            <div class="s-note-head"><h3>✉️ Email me about</h3></div>
+            <p id="email-sub" style="font-size:13px;color:#666;margin:0 0 12px">Loading…</p>
+            <div id="email-toggles"></div>
+            <p id="email-msg" style="font-size:13px;font-weight:700;margin:10px 0 0;min-height:18px"></p>
+        </div>
     </div>
 </div>
 <script src="/assets/js/api.js"></script>
@@ -89,7 +100,7 @@
         team_request: 'Team request',
         team_status:  'Team status',
         deadline:     'Deadline',
-        announcement: 'Announcement'
+        announcement: 'Announcement'   // legacy rows only
     };
 
     function whenText(iso) {
@@ -118,6 +129,41 @@
     async function load() {
         notes = await get(`/api/student/units/${unitId}/notifications`);
         render();
+        await loadEmailPrefs();
+    }
+
+    // ── Email preferences ──
+    let emailPrefs = null;
+    async function loadEmailPrefs() {
+        try {
+            emailPrefs = await get(`/api/student/units/${unitId}/email-prefs`);
+            renderEmailPrefs();
+        } catch (e) {
+            document.getElementById('email-sub').textContent = `Could not load email settings: ${e.message}`;
+        }
+    }
+
+    function renderEmailPrefs() {
+        const p = emailPrefs;
+        document.getElementById('email-sub').innerHTML = p.emailEnabled
+            ? `Sent to <strong>${escapeHtml(p.deliveringTo || 'your signup address')}</strong> for this unit. In-app notifications are unaffected.`
+            : `Email is switched off for your account, so none of these will be sent. In-app notifications still work.`;
+        document.getElementById('email-toggles').innerHTML = Object.keys(p.labels).map(c => `
+            <label style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f4fa;font-size:14px;cursor:pointer">
+              <input type="checkbox" ${p.categories[c] ? 'checked' : ''} ${p.emailEnabled ? '' : 'disabled'}
+                     onchange="setEmailPref('${c}', this.checked)">
+              <span>${escapeHtml(p.labels[c])}</span>
+            </label>`).join('');
+    }
+
+    async function setEmailPref(category, enabled) {
+        const msg = document.getElementById('email-msg');
+        try {
+            emailPrefs = await put(`/api/student/units/${unitId}/email-prefs`, { [category]: enabled });
+            renderEmailPrefs();
+            msg.style.color = '#0a7d0a'; msg.textContent = 'Saved.';
+            setTimeout(() => { msg.textContent = ''; }, 1500);
+        } catch (e) { msg.style.color = '#e94560'; msg.textContent = e.message; }
     }
 
     function render() {
@@ -131,7 +177,7 @@
 
         if (!notes.length) {
             list.innerHTML = `<div class="s-note-empty">Nothing yet. Team requests, deadline reminders,
-                team updates and teacher announcements will show up here.</div>`;
+                team updates and deadline reminders will show up here.</div>`;
             return;
         }
 
@@ -139,9 +185,9 @@
             const isRead = !!n.read_at;
             return `
               <div class="s-note-row" id="note-${n.id}">
-                <div class="s-note-dot ${isRead ? 'read' : ''}"></div>
+                <div class="s-note-dot ${isRead ? 'read' : ''}" role="img" aria-label="${isRead ? 'read' : 'unread'}"></div>
                 <div class="s-note-body">
-                  <div class="s-note-title ${isRead ? 'read' : ''}">${escapeHtml(n.title)}</div>
+                  <div class="s-note-title ${isRead ? 'read' : ''}">${isRead ? '' : `<span class="mark mark-bad" style="margin-right:6px">New</span>`}${escapeHtml(n.title)}</div>
                   ${n.body ? `<div class="s-note-text">${escapeHtml(n.body)}</div>` : ''}
                   <div class="s-note-meta">
                     <span class="s-note-type ${escapeHtml(n.type)}">${escapeHtml(TYPE_LABEL[n.type] || n.type)}</span>

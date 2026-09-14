@@ -129,7 +129,6 @@ describe('classmate search — name-tolerant, email-exact, email shown only wher
         h.studentPortalService.listUnits(viewer),
         h.studentPortalService.autoMatch(unitId, viewer),
         h.repos.studentRepo.findByUsername(viewer),
-        h.forumService.listThreads(unitId, { username: viewer, role: 'STUDENT' }),
       ];
       for (const b of blobs) {
         const json = JSON.stringify(b);

@@ -12,8 +12,6 @@ const ProgressRepository     = require('../repositories/progressRepository');
 const PreferencesRepository  = require('../repositories/preferencesRepository');
 const TeamRepository         = require('../repositories/teamRepository');
 const TutorialSlotRepository = require('../repositories/tutorialSlotRepository');
-const AnnouncementRepository = require('../repositories/announcementRepository');
-const ForumRepository        = require('../repositories/forumRepository');
 const NotificationRepository = require('../repositories/notificationRepository');
 const NotificationPrefsRepository = require('../repositories/notificationPrefsRepository');
 const EmailOutboxRepository  = require('../repositories/emailOutboxRepository');
@@ -24,9 +22,9 @@ const TeamRequestService   = require('./teamRequestService');
 const StudentPortalService = require('./studentPortalService');
 const UnitService          = require('./unitService');
 const NotificationService  = require('./notificationService');
-const ForumService         = require('./forumService');
 const MatchingService      = require('./matchingService');
 const FinaliseBatchRepository = require('../repositories/finaliseBatchRepository');
+const StudentEmailPrefsRepository = require('../repositories/studentEmailPrefsRepository');
 
 function createServices({ db, transport, env = process.env }) {
   const userRepo    = new UserRepository(db);
@@ -38,48 +36,40 @@ function createServices({ db, transport, env = process.env }) {
   const prefs       = new PreferencesRepository(db);
   const teams       = new TeamRepository(db);
   const slots       = new TutorialSlotRepository(db);
-  const announcements = new AnnouncementRepository(db);
-  const forum         = new ForumRepository(db);
   const notifications = new NotificationRepository(db);
   const notifPrefs    = new NotificationPrefsRepository(db);
   const outbox        = new EmailOutboxRepository(db);
   const batches       = new FinaliseBatchRepository(db);
+  const emailPrefs    = new StudentEmailPrefsRepository(db);
 
   const authService     = new AuthService({ userRepo, studentRepo });
   const studentService  = new StudentService({ studentRepo });
   // Rules are evaluated inside it — when a request is sent and again when
   // everyone has accepted — hence the teams and units repos.
   const teamRequestService = new TeamRequestService({ db, teams, units: unitRepo });
-  // The one service both portals call: access is decided per-caller inside it.
-  // `teams` and the request service are what let a recruiting thread show its
-  // author's live team and a working "ask to team up" button, without the
-  // forum owning a second copy of the team-up rules.
-  const forumService    = new ForumService({
-    forum, units: unitRepo, enrollment, teams, teamRequestService
-  });
   const notificationService = new NotificationService({
     db, notifications, prefs: notifPrefs, outbox, units: unitRepo, enrollment, teams,
-    announcements, userRepo, transport, env
+    userRepo, transport, emailPrefs, env
   });
   // Built before studentPortalService, which depends on it for Auto-Match.
   const matchingService = new MatchingService({
     units: unitRepo, enrollment, teams, prefs, progress
   });
   const studentPortalService = new StudentPortalService({
-    units: unitRepo, enrollment, roster, progress, prefs, teams, slots, announcements,
-    studentRepo, teamRequestService, notificationService, matchingService
+    units: unitRepo, enrollment, roster, progress, prefs, teams, slots,
+    studentRepo, teamRequestService, notificationService, matchingService, emailPrefs
   });
   const unitService = new UnitService({
-    units: unitRepo, enrollment, roster, progress, teams, prefs, slots, announcements,
+    units: unitRepo, enrollment, roster, progress, teams, prefs, slots,
     batches, teamRequestService, userRepo
   });
 
   return {
     repos: {
       userRepo, studentRepo, unitRepo, enrollment, roster, progress, prefs, teams, slots,
-      announcements, forum, notifications, notifPrefs, outbox, batches
+      notifications, notifPrefs, outbox, batches, emailPrefs
     },
-    authService, studentService, teamRequestService, forumService, notificationService,
+    authService, studentService, teamRequestService, notificationService,
     matchingService, studentPortalService, unitService
   };
 }

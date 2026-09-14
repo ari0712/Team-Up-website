@@ -78,3 +78,34 @@ function toast(msg, type = 'success') {
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 3000);
 }
+
+// ── Status marks ─────────────────────────────────────────────────────────────
+// Every colour-coded indicator in the app also says what it means in words or
+// a glyph. Colour is a secondary cue only: a red/green dot with no text is
+// invisible to a colourblind user and ambiguous to everyone else. Pages render
+// verdicts through these so no page invents its own convention.
+//
+//   ok    ✓  passes / done
+//   bad   ✕  breaks a rule / not done
+//   info  ⓘ  advisory — a fact, not a fault (e.g. under the target size)
+//   off   ○  not yet / locked
+const STATUS_MARK = {
+  ok:   { glyph: '✓', word: 'OK' },
+  bad:  { glyph: '✕', word: 'Breaks a rule' },
+  info: { glyph: 'ⓘ', word: 'Note' },
+  off:  { glyph: '○', word: 'Not yet' },
+};
+
+function statusMark(kind, text) {
+  const m = STATUS_MARK[kind] || STATUS_MARK.info;
+  const label = text === undefined ? m.word : text;
+  const safe = String(label).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  return `<span class="mark mark-${kind}" role="img" aria-label="${safe}">${m.glyph} ${safe}</span>`;
+}
+
+// One line explaining the marks a block uses, e.g. markLegend(['ok','bad','info']).
+function markLegend(kinds) {
+  return `<div class="mark-legend" aria-label="Legend">${
+    kinds.map(k => `<span>${STATUS_MARK[k].glyph} ${STATUS_MARK[k].word}</span>`).join(' · ')}</div>`;
+}

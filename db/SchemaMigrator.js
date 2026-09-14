@@ -232,10 +232,20 @@ class SchemaMigrator {
     // sides of a cancelled proposal see it, so the row can only be phrased
     // correctly if it knows which side went away — and that is unrecoverable
     // afterwards, because the losing team row is deleted by then.
-    try { db.run(`ALTER TABLE proposals ADD COLUMN cancelled_by_student_ids TEXT`); } catch (e) {}
-    // Why a request was invalidated (a team finalised, or a rule the two teams
-    // would now break). Shown to the students; '' / NULL when not applicable.
+    try { db.run(`ALTER TABLE proposals ADD COLUMN cancelled_by_student_ids TEXT`); } catch (e) {}
+
+    // Why a request was invalidated (a team finalised, or a rule the two teams
+
+    // would now break). Shown to the students; '' / NULL when not applicable.
+
     try { db.run(`ALTER TABLE proposals ADD COLUMN invalidated_reason TEXT`); } catch (e) {}
+    // The request that won when this one was auto-cancelled. Written in the
+    // same UPDATE as state='auto_cancelled', so the email dispatcher can tell a
+    // student who also got the winner's "accepted" email (suppress the
+    // cancellation) from one who only lost (send it) — keyed on the event, not
+    // on two timestamps happening to be equal. NULL for rows from before the
+    // column existed: those are sent, the safe direction.
+    try { db.run(`ALTER TABLE proposals ADD COLUMN superseded_by TEXT`); } catch (e) {}
     db.run(`CREATE INDEX IF NOT EXISTS idx_proposals_unit_state ON proposals(unit_id, state)`);
     db.run(`CREATE INDEX IF NOT EXISTS idx_proposals_expires ON proposals(state, expires_at)`);
 
@@ -314,75 +324,10 @@ class SchemaMigrator {
     // stage is derived from the team's status at read time.
     try { db.run(`ALTER TABLE student_progress ADD COLUMN teacher_approved INTEGER DEFAULT 0`); } catch (e) {}
 
-    // ── Announcements per unit ─────────────────────────────────────
-    db.run(`CREATE TABLE IF NOT EXISTS unit_announcements (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      unit_id    TEXT NOT NULL,
-      title      TEXT NOT NULL DEFAULT '',
-      content    TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT '',
-      FOREIGN KEY (unit_id) REFERENCES units(unit_id)
-    )`);
-
-    // ── Forum: the unit's shared discussion board ──────────────────
-    // The first feature students write into and other people read. Both roles
-    // post here, so `author_username` is a users.username — the same convention
-    // notifications.student_id uses — with author_role as the discriminator.
-    //
-    // The author's display name and picture are deliberately NOT stored: they
-    // are joined from `students` at read time, so editing your profile does not
-    // leave a stale name on every post you ever made. A teacher has no students
-    // row at all, which is why those joins must be LEFT joins.
-    db.run(`CREATE TABLE IF NOT EXISTS forum_threads (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      unit_id         TEXT    NOT NULL,
-      author_username TEXT    NOT NULL,
-      author_role     TEXT    NOT NULL DEFAULT 'STUDENT',
-      title           TEXT    NOT NULL DEFAULT '',
-      body            TEXT    NOT NULL DEFAULT '',
-      pinned          INTEGER NOT NULL DEFAULT 0,
-      created_at      TEXT    NOT NULL DEFAULT '',
-      FOREIGN KEY (unit_id) REFERENCES units(unit_id)
-    )`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_forum_threads_unit
-              ON forum_threads(unit_id, pinned, id)`);
-
-    // What kind of post this is: 'DISCUSSION' | 'RECRUITING'.
-    //
-    // One column, not a second table — a recruiting post IS a thread: same board,
-    // same replies, same moderation, same pinning. Only the card around it differs.
-    //
-    // And deliberately no team_id. ProposalService.executeMerge DELETEs the losing
-    // unit_teams row on every approved merge, so a team id stored here would be a
-    // dangling pointer within a day. The author's team is derived from
-    // author_username at read time, the same way author_name is, which stays
-    // correct across every merge, leave and kick without anyone editing the post.
-    //
-    // No index: the board is already fetched whole, so the tab filter is a
-    // client-side array filter, not a query.
-    try { db.run(`ALTER TABLE forum_threads ADD COLUMN kind TEXT NOT NULL DEFAULT 'DISCUSSION'`); } catch (e) {}
-
-    // unit_id is repeated here rather than reached through thread_id: it makes
-    // both the per-unit scope check and the unit-delete cascade single-table
-    // operations, with no join to get wrong.
-    //
-    // There is no reply_count or last_activity_at on forum_threads for the same
-    // reason — the list query derives both with a subquery, which cannot drift
-    // the way two denormalised counters maintained across three mutation paths
-    // eventually would.
-    db.run(`CREATE TABLE IF NOT EXISTS forum_replies (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      thread_id       INTEGER NOT NULL,
-      unit_id         TEXT    NOT NULL,
-      author_username TEXT    NOT NULL,
-      author_role     TEXT    NOT NULL DEFAULT 'STUDENT',
-      body            TEXT    NOT NULL DEFAULT '',
-      created_at      TEXT    NOT NULL DEFAULT '',
-      FOREIGN KEY (thread_id) REFERENCES forum_threads(id),
-      FOREIGN KEY (unit_id)   REFERENCES units(unit_id)
-    )`);
-    db.run(`CREATE INDEX IF NOT EXISTS idx_forum_replies_thread
-              ON forum_replies(thread_id, id)`);
+    // The forum (forum_threads / forum_replies) and announcements
+    // (unit_announcements) features were removed. Databases created before
+    // that keep their tables, untouched; nothing reads or writes them, and
+    // UnitRepository.deleteCascade clears them best-effort.
 
     // ── Notifications ──────────────────────────────────────────────
     // Rows are produced by NotificationService.syncForUnit (students) and
@@ -436,6 +381,23 @@ class SchemaMigrator {
       FOREIGN KEY (username) REFERENCES users(username)
     )`);
 
+    // A per-student, per-unit switch for each email category (see
+    // utils/emailCategories.js for the categories and their defaults). A
+    // missing row means "the default", so nothing has to be written until a
+    // student actually changes something.
+    db.run(`CREATE TABLE IF NOT EXISTS student_email_prefs (
+      username   TEXT NOT NULL,
+      unit_id    TEXT NOT NULL,
+      category   TEXT NOT NULL,
+      enabled    INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (username, unit_id, category)
+    )`);
+
+    // The unsubscribe link in every email carries this token instead of a
+    // login. Generated lazily the first time a student's email goes out.
+    try { db.run(`ALTER TABLE notification_prefs ADD COLUMN unsubscribe_token TEXT NOT NULL DEFAULT ''`); } catch (e) {}
+
     // Every message the app decided to send, whether or not a real transport
     // delivered it. Keeps dispatch auditable and makes "emailed exactly once"
     // a checkable property.
@@ -457,6 +419,9 @@ class SchemaMigrator {
     // link so a send can be opened and inspected.
     try { db.run(`ALTER TABLE email_outbox ADD COLUMN intended_recipient TEXT`); } catch (e) {}
     try { db.run(`ALTER TABLE email_outbox ADD COLUMN preview_url TEXT`); } catch (e) {}
+    // The daily cap counts a recipient's sent rows over a rolling day.
+    db.run(`CREATE INDEX IF NOT EXISTS idx_email_outbox_recipient
+              ON email_outbox(intended_recipient, status, sent_at)`);
 
     // Every group of 2+ against its unit's hard rules. Nothing is changed —
     // a group that breaks a rule stays OPEN and is reported here, so the

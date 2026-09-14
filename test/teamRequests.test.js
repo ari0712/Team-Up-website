@@ -56,7 +56,7 @@ describe('team-up requests — rules are evaluated at the moment students act', 
     assert.match(e.message, /exceed the max/i);
   });
 
-  test('checkRequest reports the rule as data for the forum card', () => {
+  test('checkRequest reports the rule as data, for UIs that need it before sending', () => {
     const unitId = h.createUnit(teacher);
     const a = h.enrolStudent(unitId, { slots: 'Tue 10' });
     const b = h.enrolStudent(unitId, { slots: 'Wed 2' });

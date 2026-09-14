@@ -649,3 +649,16 @@ body.t-page {
     align-items: center;
     gap: 6px;
 }
+/* ── Status marks (see statusMark() in api.js) ─────────────────────────────
+   Glyph + word, so no state is carried by colour alone. Colour is secondary. */
+.mark { display: inline-block; font-size: 11px; font-weight: 800; padding: 1px 7px;
+        border-radius: 20px; white-space: nowrap; margin-right: 6px; line-height: 1.6; }
+.mark-ok   { background: #e7f9ee; color: #0a7d0a; }
+.mark-bad  { background: #fdecee; color: #a8253a; }
+.mark-info { background: #eff4ff; color: #1f4fd1; }
+.mark-off  { background: #eef2f6; color: #666;    }
+.mark-legend { font-size: 11px; color: #666; margin: 6px 0 2px; }
+.mark-legend span { white-space: nowrap; }
+/* Inside the blue validation panel the marks sit on a coloured ground. */
+.s-validation .mark-legend { color: #f2f8fb; }
+.s-validation .mark { margin-right: 4px; }

@@ -21,9 +21,9 @@
            beneath it, never by colour alone. */
         .sh-steps { display:flex; gap:0; margin-top:14px }
         .sh-step  { flex:1; text-align:center; position:relative }
-        .sh-dot   { width:13px; height:13px; border-radius:50%; margin:0 auto 5px;
+        .sh-dot   { width:15px; height:15px; border-radius:50%; margin:0 auto 5px; font-size:10px; font-weight:800; line-height:13px; text-align:center; color:#8aabbf;
                     border:2px solid #c3d5e8; background:#fff }
-        .sh-step.done .sh-dot { background:#0ca30c; border-color:#0ca30c }
+        .sh-step.done .sh-dot { background:#0ca30c; border-color:#0ca30c; color:#fff }
         .sh-step-label { font-size:10.5px; color:#8aabbf; font-weight:700 }
         .sh-step.done .sh-step-label { color:#1a2a4a }
         /* Connector between dots, drawn behind them. */
@@ -169,8 +169,8 @@
         ];
         return `<div class="sh-steps">${steps.map(([name, done]) => `
             <div class="sh-step${done ? ' done' : ''}">
-              <div class="sh-dot"></div>
-              <div class="sh-step-label">${name}</div>
+              <div class="sh-dot" role="img" aria-label="${done ? 'done' : 'not yet'}">${done ? '✓' : '○'}</div>
+              <div class="sh-step-label">${name}${done ? ' · done' : ''}</div>
             </div>`).join('')}</div>`;
     }
 

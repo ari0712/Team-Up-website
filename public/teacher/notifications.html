@@ -337,9 +337,9 @@
                 : '';
             return `
               <div class="s-note-row" id="note-${n.id}">
-                <div class="s-note-dot ${isRead ? 'read' : ''}"></div>
+                <div class="s-note-dot ${isRead ? 'read' : ''}" role="img" aria-label="${isRead ? 'read' : 'unread'}"></div>
                 <div class="s-note-body">
-                  <div class="s-note-title ${isRead ? 'read' : ''}">${escapeHtml(n.title)}</div>
+                  <div class="s-note-title ${isRead ? 'read' : ''}">${isRead ? '' : `<span class="mark mark-bad" style="margin-right:6px">New</span>`}${escapeHtml(n.title)}</div>
                   ${n.body ? `<div class="s-note-text">${escapeHtml(n.body)}</div>` : ''}
                   <div class="s-note-meta">
                     ${sev}<span class="s-note-type ${escapeHtml(n.type)}">${escapeHtml(TYPE_LABEL[n.type] || n.type)}</span>

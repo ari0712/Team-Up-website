@@ -422,6 +422,7 @@
                 return `<div class="cl-stage-row">
                     <div class="cl-dot ${dotCls}"></div>
                     <span>${st.label}</span>
+                    ${statusMark(locked ? 'off' : done ? 'ok' : 'bad', locked ? 'Locked' : done ? 'Done' : 'Not yet')}
                 </div>`;
             }).join('');
             return `
@@ -494,6 +495,7 @@
             return `<div class="cl-stage-row">
                         <div class="cl-dot ${dotCls}"></div>
                         <span style="font-size:13px">${st.label}</span>
+                        ${statusMark(locked ? 'off' : done ? 'ok' : 'bad', locked ? 'Locked' : done ? 'Done' : 'Not yet')}
                     </div>`;
         }).join('')}
             </div>`;

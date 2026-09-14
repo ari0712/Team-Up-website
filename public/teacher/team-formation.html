@@ -679,7 +679,7 @@
             container.innerHTML = `<p class="tf-section-empty">No ${activeStatus.toLowerCase()} teams yet.</p>`;
             return;
         }
-        container.innerHTML = `<div class="tf-grid">${teams.map(cardHtml).join('')}</div>`;
+        container.innerHTML = `${markLegend(['ok', 'bad', 'info'])}<div class="tf-grid">${teams.map(cardHtml).join('')}</div>`;
     }
 
     function cardHtml(team) {
@@ -693,17 +693,18 @@
                 </div>
                 <div class="tf-val-row">
                     <div class="tf-dot ${sizeDotClass(v)}"></div>
-                    ${sizeText(v, team.members.length)}
+                    ${statusMark(sizeKind(v))} ${sizeText(v, team.members.length)}
                 </div>
                 <div class="tf-val-row">
                     <div class="tf-dot ${violates(v, 'NO_SHARED_TUTORIAL') ? 'tf-dot-red' : v.tutorialShared ? 'tf-dot-green' : 'tf-dot-amber'}"></div>
+                    ${statusMark(v.tutorialRequired === false ? 'info' : violates(v, 'NO_SHARED_TUTORIAL') ? 'bad' : v.tutorialShared ? 'ok' : 'info')}
                     ${v.tutorialRequired === false ? 'Shared tutorial not required'
                         : v.tutorialShared ? `Members share ${v.sharedTutorials[0]}`
                         : 'No shared tutorial slot'}
                 </div>
                 <div class="tf-val-row">
                     <div class="tf-dot ${violates(v, 'NEW_TO_QUT_CAP') ? 'tf-dot-red' : 'tf-dot-green'}"></div>
-                    New-to-QUT students: ${v.newToQutCount} / ${v.maxNewToQut}
+                    ${statusMark(violates(v, 'NEW_TO_QUT_CAP') ? 'bad' : 'ok')} New-to-QUT students: ${v.newToQutCount} / ${v.maxNewToQut}
                 </div>
                 <button class="tf-view-btn" onclick="viewTeam('${team.team_id}')">View Team</button>
             </div>`;
@@ -718,6 +719,7 @@
     };
     const sizeDotClass = v => v.sizeState === 'COMPLETE' ? 'tf-dot-green'
         : v.sizeState === 'OVER_MAX' ? 'tf-dot-red' : 'tf-dot-amber';
+    const sizeKind = v => v.sizeState === 'COMPLETE' ? 'ok' : v.sizeState === 'OVER_MAX' ? 'bad' : 'info';
     const sizeText = (v, n) => v.sizeState === 'COMPLETE'
         ? `Team has ${n} student${n !== 1 ? 's' : ''} — complete`
         : v.sizeState === 'OVER_MAX' ? `Team has ${n} students — over the maximum`

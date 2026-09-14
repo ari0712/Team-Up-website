@@ -126,7 +126,6 @@ Open `http://localhost:3000` to reach the portal-select page. From there you sig
   themselves (see *How a group is recorded*).
 - **Organiser** – after the deadline, an auto-match suggestion the coordinator can
   edit and **finalise** as one revertible batch.
-- **Announcements** – post unit announcements.
 
 ### Student portal
 - **Account** – sign up / log in. The student number is captured at signup for the
@@ -170,7 +169,7 @@ teamup-web/
 │   └── teamRequestService.js class TeamRequestService — team-up requests, rules checked at send and accept
 ├── routes/                   Express REST API (router factories: deps → router)
 │   ├── auth.js               login / signup / logout / me
-│   ├── units.js              teacher: units, class lists, progress, team reviews, announcements
+│   ├── units.js              teacher: units, class lists, progress, team reviews
 │   └── student.js            student: join units, preferences, teams, team-up requests
 ├── middleware/auth.js        Session guards (requireAuth / requireStudent / requireTeacher)
 ├── utils/                    Helpers (uuid, team-size parsing, team validation)
@@ -203,7 +202,6 @@ created automatically by `db/SchemaMigrator.js` on startup (idempotent
 | `unit_teams` / `unit_team_members` | unit-scoped teams and membership |
 | `proposals` / `proposal_votes` | team-up requests and each member's accept/decline (legacy table names) |
 | `finalise_batches` | one row per organiser save, with a snapshot so the batch can be reverted |
-| `unit_announcements` | teacher announcements per unit |
 
 ### How a group is recorded
 
@@ -218,6 +216,68 @@ preference change that would put a recorded group in breach is refused too
 
 The unit's **deadline** is the only thing that freezes students: after it, sending,
 accepting, leaving and removing all return `403 DEADLINE_PASSED` server-side.
+
+### How teams move
+
+<!-- Source: docs/state-diagrams.md — keep the two blocks below in sync with it. -->
+
+A team is **OPEN** (its students can still change it, until the unit's deadline) or
+**FINALISED** (the coordinator has allocated it; membership and preferences are
+frozen). Only the coordinator moves a team between the two. Full definitions and
+notes: [docs/state-diagrams.md](docs/state-diagrams.md).
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> OPEN : joins the unit (student) — a team of one
+
+    OPEN --> OPEN : stays OPEN through every student change — team-up accepted by everyone (students), leave or remove a member (student) — and through dissolve (coordinator)
+
+    OPEN --> FINALISED : finalise one team (coordinator)
+    OPEN --> FINALISED : finalise a grouping from the organiser (coordinator) — one revertible batch
+
+    FINALISED --> OPEN : reopen one team (coordinator)
+    FINALISED --> OPEN : revert a batch (coordinator) — prior teams, members and declarations restored
+
+    OPEN --> [*] : unit deleted (coordinator)
+    FINALISED --> [*] : unit deleted (coordinator)
+
+    note right of OPEN
+        Students can still change it,
+        until the unit deadline.
+    end note
+    note right of FINALISED
+        Allocated by the coordinator.
+        Membership and preferences frozen.
+    end note
+```
+
+The flow a student actually experiences is the **team-up request**: one side asks,
+every member of both teams accepts or declines, and unanimous acceptance joins the
+two teams. (Stored under the older `proposals.state` names.)
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> open : Ask to team up (student) — rules checked first, sender counts as accepted
+
+    open --> approved : every member of both teams accepts (students) — rules re-checked, teams join
+    open --> rejected : any member declines (student)
+    open --> expired : 48 hours pass without unanimous acceptance (system sweep)
+    open --> invalidated : a team is finalised, a member leaves, the deadline passes, or a rule would now fail (system or coordinator)
+    open --> auto_cancelled : another request touching either team was accepted first (system)
+
+    approved --> [*]
+    rejected --> [*]
+    expired --> [*]
+    invalidated --> [*]
+    auto_cancelled --> [*]
+
+    note right of open
+        Shown as waiting for N to accept,
+        with an auto-decline countdown.
+    end note
+```
 
 ### Team size is a target, not a gate
 
@@ -299,6 +359,10 @@ deployment makes the call consciously rather than by default.
 4. **The search rate limiter is in-memory and per-process.** It resets on restart and
    is not shared across instances — fine for the single-process sql.js deployment this
    app is. Running TeamUp multi-instance needs a shared store (Redis, or a table).
+5. **The email daily cap is 10.** Enough for a busy day of team-up traffic;
+   deliberately low so a 400-student unit cannot generate thousands of sends
+   from one teacher action. Raise it in `services/notificationService.js` if
+   real usage shows students hitting it.
 
 ## API Reference
 
@@ -331,8 +395,6 @@ session of the matching role.
 | GET  | `/:unitId/export` | The coordinator's report as rows: teams, ungrouped students by category, summary |
 | GET  | `/:unitId/suggestions` | Auto-match suggestion (after the deadline) |
 | POST | `/:unitId/finalise-teams` | Finalise a grouping as one revertible batch (after the deadline) |
-| GET  | `/:unitId/announcements` | List announcements |
-| POST | `/:unitId/announcements` | Post an announcement |
 | GET  | `/student/enrolled` | (student) Units the caller is enrolled in |
 
 ### Student portal — `/api/student`
@@ -353,9 +415,43 @@ session of the matching role.
 
 ## Email notifications
 
-Students get a **Notifications** tab with an unread badge, covering team requests,
-deadline reminders, team status changes and teacher announcements. Each new
-notification is also dispatched as an email by the background pass.
+Students get a **Notifications** tab with an unread badge, covering team-up
+requests, deadline reminders and team status changes.
+Email is a delivery channel for those same events — same rows, same dedupe keys
+— dispatched by the background pass once a minute.
+
+### What is emailed, and the defaults
+
+Per student, per unit, three switches (`student_email_prefs`; the Notifications
+page has the toggles, and every email ends with a one-click unsubscribe for its
+own category that needs no login):
+
+| Category | Events | Default |
+| --- | --- | --- |
+| Team-up requests | received · accepted · declined · **about to expire (24 h)** · no longer valid · withdrawn | **on** |
+| Your team | finalised / reopened by the coordinator | **on** |
+| Deadline reminders | a week / 3 days / a day away / passed | off |
+
+Never emailed: a request that *expired* (the 24 h warning already went out;
+nothing is left to do) and internal rows. A *withdrawn* request (another
+team-up completed first) is emailed only to students who were **not** also in
+the winning request — they got that one's "accepted" instead. That rule is
+keyed on `proposals.superseded_by`, never on timestamps.
+
+The account-level switch (`notification_prefs.email_enabled`) and minimum
+severity still apply on top. `APP_BASE_URL` builds the links in the body.
+
+### Volume bounds
+
+- **One email per event per student**, guaranteed by `notifications.emailed_at`,
+  which is stamped *before* the transport is called. A crash mid-send leaves a
+  visible failed/queued row in `email_outbox`, never a duplicate. The stamp is
+  in the database file, so it survives restarts.
+- **10 emails per student per rolling day** (`EMAIL_DAILY_CAP`). Anything past
+  it is dropped with a reason in the outbox and one warn line naming the user —
+  not deferred, because a "request received" email a day late is worse than
+  none, and the in-app inbox still has it.
+- The two default-off categories are the ones that fan out to a whole class.
 
 Configure with a `.env` file in the project root (copy `.env.example`). `.env` is
 git-ignored; real environment variables override it.

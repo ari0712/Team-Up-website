@@ -19,7 +19,7 @@ function csvRemove(csv, label) {
 }
 
 // Orchestrates the teacher unit-management surface: units, class lists, progress,
-// the coordinator's overrides, the export, announcements and tutorial slots.
+// the coordinator's overrides, the export and tutorial slots.
 // Business rules and ownership checks live here; routes stay thin.
 //
 // The coordinator never approves individual teams. Groups record themselves
@@ -28,7 +28,7 @@ function csvRemove(csv, label) {
 // dissolve one team, or finalise a whole grouping from the organiser and
 // revert that batch as a unit.
 class UnitService {
-  constructor({ units, enrollment, roster, progress, teams, prefs, slots, announcements,
+  constructor({ units, enrollment, roster, progress, teams, prefs, slots,
                 batches, teamRequestService, userRepo }) {
     this.users = userRepo;
     this.units = units;
@@ -38,7 +38,6 @@ class UnitService {
     this.teams = teams;
     this.prefs = prefs;
     this.slots = slots;
-    this.announcements = announcements;
     this.batches = batches;
     this.requests = teamRequestService;
   }
@@ -585,18 +584,6 @@ class UnitService {
       ungrouped,
       summary: { total: students.length, placements, teamsByStatus, labels: PLACEMENT_LABELS }
     };
-  }
-
-  getAnnouncements(unitId, teacherId) {
-    this._ownedOr404(unitId, teacherId);
-    return this.announcements.listForUnit(unitId);
-  }
-
-  postAnnouncement(unitId, teacherId, title, content) {
-    this._ownedOr404(unitId, teacherId);
-    if (!title || !title.trim()) throw new ServiceError('Title is required', 400);
-    this.announcements.create(unitId, title.trim(), (content || '').trim(), new Date().toISOString());
-    return { ok: true };
   }
 
   // ── Roster: who may join this unit ───────────────────────────────────────────
