@@ -2,9 +2,9 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const { validateTeam, targetSizeLabel } = require('../utils/teamValidator');
 
-const unit = (over = {}) => ({ valid_team_sizes: '4', must_share_tutorial: 1, max_new_to_qut: 2, ...over });
-const member = (id, slots, newToQut = 0) =>
-  ({ student_id: id, name: id, status: 'ACCEPTED', tutorial_slots: slots, is_new_to_qut: newToQut });
+const unit = (over = {}) => ({ valid_team_sizes: '4', must_share_tutorial: 1, ...over });
+const member = (id, slots) =>
+  ({ student_id: id, name: id, status: 'ACCEPTED', tutorial_slots: slots });
 
 describe('validateTeam — size is advisory, rules are hard', () => {
   test('a valid pair is UNDER_TARGET, has no violations, and can be submitted', () => {
@@ -43,17 +43,6 @@ describe('validateTeam — size is advisory, rules are hard', () => {
     const v = validateTeam([member('a', 'Tue 10'), member('bob', '')], unit());
     assert.equal(v.violations[0].code, 'NO_SHARED_TUTORIAL');
     assert.match(v.violations[0].why, /bob has no tutorial availability saved/);
-  });
-
-  test('a trio of three new-to-QUT students is a NEW_TO_QUT_CAP violation', () => {
-    const v = validateTeam(
-      [member('a', 'Tue 10', 1), member('b', 'Tue 10', 1), member('c', 'Tue 10', 1)], unit());
-    assert.equal(v.canSubmit, false);
-    assert.equal(v.violations.length, 1);
-    assert.equal(v.violations[0].code, 'NEW_TO_QUT_CAP');
-    assert.match(v.violations[0].rule, /Maximum 2 new-to-QUT/);
-    assert.match(v.violations[0].why, /3 of the 3 members are new to QUT/);
-    assert.equal(v.newToQutOk, false);
   });
 
   test('a solo student has no violations but cannot submit a group', () => {

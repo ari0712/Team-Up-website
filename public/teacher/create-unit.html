@@ -55,29 +55,28 @@
             <input class="t-input" id="semester" type="text" placeholder="e.g. 2026 Semester 1">
         </div>
         <div class="t-field-row">
-            <label class="t-label">Deadline:</label>
-            <input class="t-input t-input-wide" id="deadline" type="datetime-local">
+            <label class="t-label" for="deadline">Deadline:</label>
+            <div class="t-deadline-block">
+                <div class="t-deadline-row">
+                    <input class="t-input t-input-wide" id="deadline" type="datetime-local">
+                    <button type="button" class="t-deadline-confirm" id="deadline-confirm">Confirm</button>
+                </div>
+                <p class="t-deadline-note" id="deadline-note"></p>
+            </div>
         </div>
 
         <h3 class="t-section-title">Rule Set</h3>
         <div class="t-ruleset">
             <div class="t-rule-box t-size-box">
                 <p class="t-rule-label">Team Size:</p>
-                <div class="t-num-grid" id="teamSizeGrid"></div>
-            </div>
-            <div class="t-rule-right">
-                <div class="t-rule-box t-toggle-box" onclick="toggleRule('maxOneGroup')">
-                    <span>Max One Group Per Student:</span>
-                    <span class="t-tick" id="tick-maxOneGroup">✓</span>
+                <div class="t-size-range">
+                    <label for="minSize">Minimum</label>
+                    <input class="t-input t-size-input" id="minSize" type="number" min="1" value="4">
+                    <label for="maxSize">Maximum</label>
+                    <input class="t-input t-size-input" id="maxSize" type="number" min="1" value="5">
                 </div>
-                <div class="t-rule-box t-toggle-box" onclick="toggleRule('mustShare')">
-                    <span>Students Must Share Tutorial Time:</span>
-                    <span class="t-tick" id="tick-mustShare">✓</span>
-                </div>
-            </div>
-            <div class="t-rule-box t-qut-box">
-                <p class="t-rule-label">Maximum new-to-QUT Students Per Group:</p>
-                <div class="t-num-grid" id="newQutGrid"></div>
+                <p class="t-rule-hint">Every student can only be in one team, and all members of a
+                   team must share a tutorial time.</p>
             </div>
         </div>
 
@@ -97,8 +96,7 @@
             One column headed <code>email</code>, one address per row — these are the students
             allowed to join. Optional columns are picked up when the header names them:
             <code>name</code>, <code>student id</code>, <code>tutorial</code>, <code>degree</code>,
-            <code>major</code>, <code>minor</code>, <code>units passed</code>,
-            <code>new to QUT</code>, <code>skills</code>.
+            <code>major</code>, <code>minor</code>, <code>units passed</code>, <code>skills</code>.
             You can upload more files later from the Class List page to add students to this unit.
         </p>
         <div class="t-error" id="errorMsg"></div>
@@ -106,6 +104,8 @@
 </main>
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/roster-csv.js"></script>
+<script src="/assets/js/team-sizes.js"></script>
+<script src="/assets/js/deadline-confirm.js"></script>
 <script>
     // Email is the one field that must be present — it is the roster match key,
     // so a row without one can never admit anybody. Optional per-student columns
@@ -114,50 +114,19 @@
     //
     // This is not a one-shot import: more files can be uploaded later from the
     // Class List page to top the same unit up.
-    const state = {
-        teamSizes: new Set([4, 5]),
-        maxOneGroup: true,
-        mustShare: true,
-        maxNewToQut: 2,
-        students: []
-    };
+    //
+    // "Max one group per student" and "must share a tutorial" are not offered
+    // here: every unit has them, and the server stores them as on regardless.
+    // Team size is the only configurable rule, entered as a min–max range and
+    // sent as the size list the server stores (see /assets/js/team-sizes.js).
+    const state = { students: [] };
 
     (async () => {
         const user = await requireSession('TEACHER');
         if (!user) return;
         document.getElementById('teacherName').textContent = user.username;
-        buildGrids();
+        bindDeadlineConfirm('deadline', 'deadline-confirm', 'deadline-note');
     })();
-
-    function buildGrids() {
-        buildNumGrid('teamSizeGrid', 1, 6, 'size', n => state.teamSizes.has(n));
-        buildNumGrid('newQutGrid',   1, 6, 'qut',  n => n === state.maxNewToQut);
-    }
-
-    function buildNumGrid(id, min, max, type, isSel) {
-        document.getElementById(id).innerHTML =
-            Array.from({length: max - min + 1}, (_,i) => i + min).map(n => {
-                const s = isSel(n);
-                return `<div class="t-num-cell ${s?'selected':''}"
-                   onclick="toggleNum('${type}',${n})">
-                ${n}${s?' ✓':''}
-              </div>`;
-            }).join('');
-    }
-
-    function toggleNum(type, val) {
-        if (type === 'size') {
-            state.teamSizes.has(val) ? state.teamSizes.delete(val) : state.teamSizes.add(val);
-        } else {
-            state.maxNewToQut = val;
-        }
-        buildGrids();
-    }
-
-    function toggleRule(rule) {
-        state[rule] = !state[rule];
-        document.getElementById(`tick-${rule}`).style.visibility = state[rule] ? 'visible' : 'hidden';
-    }
 
     function onCsvSelected(input) {
         const file = input.files[0];
@@ -186,18 +155,19 @@
         const errEl       = document.getElementById('errorMsg');
         errEl.textContent = '';
 
+        const minSize = parseInt(document.getElementById('minSize').value, 10);
+        const maxSize = parseInt(document.getElementById('maxSize').value, 10);
+
         if (!unitName)          { errEl.textContent = 'Unit name is required.'; return; }
         if (!deadline)          { errEl.textContent = 'Please set a deadline.'; return; }
-        if (!state.teamSizes.size) { errEl.textContent = 'Select at least one team size.'; return; }
+        if (!(minSize >= 1))    { errEl.textContent = 'Minimum team size must be at least 1.'; return; }
+        if (!(maxSize >= minSize)) { errEl.textContent = 'Maximum team size must be at least the minimum.'; return; }
 
         try {
             const r = await post('/api/units', {
                 unitName, description, semester, deadline,
-                validTeamSizes: [...state.teamSizes].sort((a,b)=>a-b).join(','),
-                maxOneGroup:       state.maxOneGroup,
-                mustShareTutorial: state.mustShare,
-                maxNewToQut:       state.maxNewToQut,
-                students:          state.students
+                validTeamSizes: sizesCsvFromRange(minSize, maxSize),
+                students:       state.students
             });
             // The unit exists either way, so this reports rather than blocks —
             // but a list that only half-imported must not leave silently.

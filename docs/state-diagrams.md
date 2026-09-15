@@ -55,8 +55,7 @@ Notes:
   `403 DEADLINE_PASSED`, and the coordinator's organiser unlocks. Pushing the
   deadline out reopens formation with no other change.
 - **Rules are checked at the moment of the team-up**, not at finalise: a
-  request that would break a hard rule (shared tutorial, new-to-QUT cap, max
-  size) is refused when sent and re-checked when everyone has accepted. A
+  request that would break a hard rule (shared tutorial, max size) is refused when sent and re-checked when everyone has accepted. A
   recorded group can still be put in breach later by a rule or slot edit; the
   student sees that on My Team, the coordinator in the rules-impact preview.
 - **Migration** from the approval era: `FORMING`, `SUBMITTED` → `OPEN`;

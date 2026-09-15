@@ -121,15 +121,6 @@
             border: 1px solid #eef3f8;
             border-radius: 8px;
         }
-        .ex-pill {
-            display: inline-block;
-            font-size: 11px;
-            font-weight: 700;
-            padding: 2px 8px;
-            border-radius: 20px;
-        }
-        .ex-pill-yes { background: #fff3cd; color: #856404; }
-        .ex-pill-no  { background: #e9ecef; color: #555; }
         .ex-msg { font-size: 13px; color: #e94560; margin-top: 8px; }
     </style>
 </head>
@@ -156,7 +147,7 @@
             <h3>Download Team Formation Report</h3>
             <p class="muted">
                 Excel workbook with three sheets: <strong>Teams</strong> (every group with its status,
-                size against the target, shared tutorial and new-to-QUT flags), <strong>Ungrouped</strong> (students not in a
+                size against the target and shared tutorial), <strong>Ungrouped</strong> (students not in a
                 group, by category), and <strong>Summary</strong> (counts at a glance).
                 Every row carries the student's <strong>email</strong> — the join key against your class list.
                 <span id="ex-number-note"></span>
@@ -274,10 +265,6 @@
 
     // Cell renderers for columns that deserve more than plain text.
     function cell(col, val) {
-        if (col === 'New to QUT') {
-            return val === 'Yes' ? '<span class="ex-pill ex-pill-yes">Yes</span>'
-                 : val === 'No'  ? '<span class="ex-pill ex-pill-no">No</span>' : '';
-        }
         if (col === 'Category') {
             const c = byLabel(val);
             return `<span class="att-chip ${c.cls}">${c.icon} ${esc(val)}</span>`;

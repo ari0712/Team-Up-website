@@ -175,7 +175,7 @@ class TeamRepository extends BaseRepository {
       `SELECT * FROM unit_teams WHERE unit_id = ? ORDER BY team_number, rowid`, [unitId]);
     const byId = new Map(teams.map(t => [t.team_id, { ...t, members: [] }]));
     const rows = this.all(
-      `SELECT tm.team_id, tm.student_id, tm.status, us.name, us.is_new_to_qut,
+      `SELECT tm.team_id, tm.student_id, tm.status, us.name,
               sup.tutorial_slots, us.tutorial_time,
               COALESCE(NULLIF(sup.preferred_role, ''), tm.role) AS role
          FROM unit_team_members tm
@@ -201,7 +201,7 @@ class TeamRepository extends BaseRepository {
   // reach it for students who never visited Preferences.
   getMembersDetailed(unitId, teamId) {
     return this.all(
-      `SELECT tm.student_id, tm.status, us.name, us.is_new_to_qut,
+      `SELECT tm.student_id, tm.status, us.name,
               sup.tutorial_slots, us.tutorial_time,
               COALESCE(NULLIF(sup.preferred_role, ''), tm.role) AS role
        FROM unit_team_members tm

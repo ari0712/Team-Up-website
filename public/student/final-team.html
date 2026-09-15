@@ -68,7 +68,6 @@
         <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:10px">Team Quality Score: ${team.quality_score || 88}%</div>
         <div class="s-val-row"><div class="s-val-dot" style="background:#22c55e"></div> ${statusMark('ok', 'Final')} Team has ${members.length} students</div>
         <div class="s-val-row"><div class="s-val-dot" style="background:#22c55e"></div> ${statusMark('ok', 'Final')} ${validation.sharedTutorials[0] ? `Members share ${validation.sharedTutorials[0]}` : 'Tutorial shared'}</div>
-        <div class="s-val-row"><div class="s-val-dot" style="background:#22c55e"></div> ${statusMark('ok', 'Final')} New-to-QUT students: ${validation.newToQutCount} / ${validation.maxNewToQut}</div>
         <div class="s-val-row"><div class="s-val-dot" style="background:#22c55e"></div> ${statusMark('ok', 'Final')} All members accepted</div>
       </div>`;
     })();

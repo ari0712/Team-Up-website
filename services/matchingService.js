@@ -97,7 +97,6 @@ class MatchingService {
         preferred_role: (full.preferred_role || '').trim(),
         interests: csvSet(full.project_interests),
         slots: slotsOf(full),
-        is_new_to_qut: (full.is_new_to_qut == 1) ? 1 : 0,
         from_team: fromTeam,
       };
     };
@@ -133,11 +132,6 @@ class MatchingService {
   // How well `c` fits the team built so far. Higher is better; null means the
   // candidate is not allowed in at all.
   _score(team, c, unit) {
-    if (unit.max_new_to_qut != null) {
-      const newCount = team.filter(m => m.is_new_to_qut).length + (c.is_new_to_qut ? 1 : 0);
-      if (newCount > unit.max_new_to_qut) return null;      // a unit rule, not a preference
-    }
-
     const sharesTutorial = team.every(m => shareAny(m.slots, c.slots));
     if (unit.must_share_tutorial && team.length && !sharesTutorial) return null;
 
@@ -203,7 +197,6 @@ class MatchingService {
       unassigned_reason: this._whyUnassigned(unassigned, free, unit, minSize),
       valid_team_sizes: unit.valid_team_sizes,
       must_share_tutorial: !!unit.must_share_tutorial,
-      max_new_to_qut: unit.max_new_to_qut,
       teams: teams.map((t, i) => ({
         ...this._describe(t.members, unit, i),
         // The page draws these as one locked block and finaliseTeams refuses to
@@ -253,7 +246,6 @@ class MatchingService {
         preferred_role: (full.preferred_role || m.preferred_role || '').trim(),
         interests: csvSet(full.project_interests ?? m.project_interests),
         slots: slotsOf(Object.keys(full).length ? full : m),
-        is_new_to_qut: ((full.is_new_to_qut ?? m.is_new_to_qut) == 1) ? 1 : 0,
       };
     };
 
@@ -279,7 +271,7 @@ class MatchingService {
       if (myMembers.length + members.length > maxSize) continue;   // would overflow the unit rule
 
       // Fold their members onto my team one at a time through the shared scorer.
-      // A null at any step means a hard rule (tutorial / new-to-QUT) forbids it.
+      // A null at any step means the shared-tutorial rule forbids it.
       let running = [...myMembers], total = 0, allowed = true;
       for (const m of members) {
         const s = this._score(running, m, unit);
@@ -292,7 +284,6 @@ class MatchingService {
       const merged = running.map(m => ({
         student_id: m.student_id, status: 'ACCEPTED',
         tutorial_slots: [...m.slots].join(','),
-        is_new_to_qut: m.is_new_to_qut,
       }));
       const validation = validateTeam(merged, unit, { tutorialFallback: true });
       const team = this.teams.findById(teamId);
@@ -365,8 +356,7 @@ class MatchingService {
              'with yours. Check your tutorial times on the Preferences page.';
     if (myMembers.length >= maxSize)
       return `Your team is already at the largest size this unit allows (${maxSize}).`;
-    return `Every open team would push you past the largest allowed size (${maxSize}), or breaks the ` +
-           `limit of ${unit.max_new_to_qut} new-to-QUT students per team.`;
+    return `Every open team would push you past the largest allowed size (${maxSize}).`;
   }
 
   // Diagnose a leftover so the teacher knows which rule to relax rather than
@@ -387,11 +377,10 @@ class MatchingService {
       const noSlots = pool.filter(s => !s.slots.size).map(s => s.name);
       if (noSlots.length)
         return `${noSlots.join(', ')} ${noSlots.length === 1 ? 'has' : 'have'} no tutorial availability ` +
-               `saved, and this unit requires a shared tutorial. Ask them to set it, or turn off ` +
-               `"must share tutorial" in the unit's rules.`;
-      return `This unit requires a shared tutorial slot, and no ${minSize} of these students share one — ` +
+               `saved, and every team must share a tutorial. Ask them to set it on their Preferences page.`;
+      return `Every team must share a tutorial slot, and no ${minSize} of these students share one — ` +
              (best ? `the most popular slot (${best[0]}) is only available to ${best[1]} of them. ` : '') +
-             `Place them by hand below, or turn off "must share tutorial" in the unit's rules.`;
+             `Place them by hand below.`;
     }
     return `Not enough students remained to fill a team of ${minSize}. Place them by hand below.`;
   }
@@ -402,7 +391,6 @@ class MatchingService {
       preferred_role: m.preferred_role,
       tutorial_slots: [...m.slots].join(','),
       project_interests: [...m.interests].join(','),
-      is_new_to_qut: m.is_new_to_qut,
       from_team: m.from_team,
     };
   }
@@ -413,7 +401,6 @@ class MatchingService {
     const shaped = members.map(m => ({
       student_id: m.student_id, status: 'ACCEPTED',
       tutorial_slots: [...m.slots].join(','),
-      is_new_to_qut: m.is_new_to_qut,
     }));
     const validation = validateTeam(shaped, unit, { tutorialFallback: true, includeAllAccepted: true });
 

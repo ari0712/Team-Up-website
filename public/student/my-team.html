@@ -181,8 +181,6 @@
             : 'No tutorial availability yet';
         const tutorialDot = !v.tutorialRequired ? NEUTRAL : has('NO_SHARED_TUTORIAL') ? RED : v.tutorialShared ? GREEN : NEUTRAL;
         const tutorialKind = !v.tutorialRequired ? 'info' : has('NO_SHARED_TUTORIAL') ? 'bad' : v.tutorialShared ? 'ok' : 'info';
-        const newDot = has('NEW_TO_QUT_CAP') ? RED : GREEN;
-        const newKind = has('NEW_TO_QUT_CAP') ? 'bad' : 'ok';
 
         // ── Status banners ──
         // Finalised: the coordinator has allocated this team; nothing changes now.
@@ -240,7 +238,6 @@
         <h4>Team Validation :</h4>
         <div class="s-val-row"><div class="s-val-dot" style="background:${sizeDot}"></div> ${statusMark(sizeKind)} ${sizeText}</div>
         <div class="s-val-row"><div class="s-val-dot" style="background:${tutorialDot}"></div> ${statusMark(tutorialKind)} ${tutorialText}</div>
-        <div class="s-val-row"><div class="s-val-dot" style="background:${newDot}"></div> ${statusMark(newKind)} New-to-QUT students: ${v.newToQutCount} / ${v.maxNewToQut}</div>
         ${markLegend(['ok', 'bad', 'info'])}
       </div>
       ${recordedNote}

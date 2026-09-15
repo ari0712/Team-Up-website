@@ -4,10 +4,10 @@
 // Two kinds of outcome, and they are deliberately not the same thing:
 //
 //   VIOLATIONS  — hard fails. The unit's rules that must actually hold: a
-//                 shared tutorial slot (when the unit requires one), the
-//                 new-to-QUT cap, and the largest allowed size. A team with any
-//                 of these cannot be submitted or applied, and the UI shows the
-//                 rule and why this team breaks it.
+//                 shared tutorial slot (when the unit requires one) and the
+//                 largest allowed size. A team with either cannot be submitted
+//                 or applied, and the UI shows the rule and why this team
+//                 breaks it.
 //
 //   sizeState   — advisory. `valid_team_sizes` is the TARGET for the final
 //                 allocation, not a gate. A group of 2 or 3 is a valid,
@@ -44,9 +44,6 @@ function validateTeam(members, unit, { tutorialFallback = false, includeAllAccep
   }
   const sharedTutorials = computedShared || [];
 
-  const newToQutCount = members.filter(m => m.is_new_to_qut == 1).length;
-  const maxNewToQut = unit.max_new_to_qut || 2;
-
   // ── Size: advisory unless over the maximum ──
   let sizeState, needed = 0;
   if (targetSizes.includes(size)) {
@@ -77,14 +74,6 @@ function validateTeam(members, unit, { tutorialFallback = false, includeAllAccep
     });
   }
 
-  if (newToQutCount > maxNewToQut) {
-    violations.push({
-      code: 'NEW_TO_QUT_CAP',
-      rule: `Maximum ${maxNewToQut} new-to-QUT student${maxNewToQut === 1 ? '' : 's'} per team`,
-      why: `${newToQutCount} of the ${size} member${size === 1 ? '' : 's'} ${newToQutCount === 1 ? 'is' : 'are'} new to QUT`
-    });
-  }
-
   if (sizeState === 'OVER_MAX') {
     violations.push({
       code: 'OVER_MAX_SIZE',
@@ -101,10 +90,7 @@ function validateTeam(members, unit, { tutorialFallback = false, includeAllAccep
     tutorialShared: includeAllAccepted
       ? sharedTutorials.length > 0
       : (computedShared && computedShared.length > 0),
-    newToQutOk:     newToQutCount <= maxNewToQut,
     sharedTutorials,
-    newToQutCount,
-    maxNewToQut,
     // The violation / advisory split.
     size,
     targetSizes,

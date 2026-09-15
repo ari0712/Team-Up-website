@@ -35,13 +35,13 @@ describe('coordinator override — finalise / reopen / dissolve, and revertible 
   });
 
   test('finalise is refused when the team currently breaks a rule', () => {
-    const unitId = h.createUnit(teacher, { maxNewToQut: 2 });
-    const a = h.enrolStudent(unitId, { newToQut: 1 }), b = h.enrolStudent(unitId, { newToQut: 1 });
-    h.teamUp(unitId, a, b);
-    h.unitService.updateRules(unitId, teacher, { maxNewToQut: 1 });   // the pair is now in breach
+    const unitId = h.createUnit(teacher, { validTeamSizes: '3,4' });
+    const [a, b, c] = [1, 2, 3].map(() => h.enrolStudent(unitId));
+    h.teamUp(unitId, a, b); h.teamUp(unitId, c, a);
+    h.unitService.updateRules(unitId, teacher, { validTeamSizes: '2' });   // the trio is now in breach
     const e = expectServiceError(
       () => h.unitService.overrideTeam(unitId, teacher, h.teamOf(unitId, a).team_id, 'finalise'), 400, 'TEAM_CONSTRAINT');
-    assert.match(e.message, /Maximum 1 new-to-QUT/);
+    assert.match(e.message, /Largest allowed team size is 2/);
   });
 
   test('dissolve re-homes every member to a team of one and leaves declarations alone', () => {

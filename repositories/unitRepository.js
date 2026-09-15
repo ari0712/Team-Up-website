@@ -57,7 +57,7 @@ class UnitRepository extends BaseRepository {
       // request per card. Progress flags follow listWithProgress; the team
       // subqueries follow listClassmates.
       `SELECT u.unit_id, u.unit_name, u.description, u.semester, u.deadline,
-              u.valid_team_sizes, u.max_one_group, u.must_share_tutorial, u.max_new_to_qut,
+              u.valid_team_sizes, u.max_one_group, u.must_share_tutorial,
               CASE WHEN us.student_id IS NOT NULL THEN 1 ELSE 0 END AS joined,
               COALESCE(sp.read_rules,          0) AS read_rules,
               COALESCE(sp.entered_preferences, 0) AS entered_preferences,
@@ -92,14 +92,16 @@ class UnitRepository extends BaseRepository {
     );
   }
 
+  // `max_new_to_qut` is a retired column: the new-to-QUT cap is no longer a
+  // rule, so it is neither written nor read. It keeps its schema default.
   create(u) {
     this.run(
       `INSERT INTO units
          (unit_id, unit_name, description, semester, deadline, created_by,
-          valid_team_sizes, max_one_group, must_share_tutorial, max_new_to_qut, student_count)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          valid_team_sizes, max_one_group, must_share_tutorial, student_count)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
       [u.unitId, u.unitName, u.description, u.semester, u.deadline, u.createdBy,
-       u.validTeamSizes, u.maxOneGroup, u.mustShareTutorial, u.maxNewToQut, u.studentCount]
+       u.validTeamSizes, u.maxOneGroup, u.mustShareTutorial, u.studentCount]
     );
   }
 
@@ -166,12 +168,11 @@ class UnitRepository extends BaseRepository {
           valid_team_sizes    = ?,
           max_one_group       = ?,
           must_share_tutorial = ?,
-          max_new_to_qut      = ?,
           deadline            = ?,
           at_risk_days        = ?,
           export_student_number = ?
        WHERE unit_id = ?`,
-      [r.validTeamSizes, r.maxOneGroup, r.mustShareTutorial, r.maxNewToQut, r.deadline,
+      [r.validTeamSizes, r.maxOneGroup, r.mustShareTutorial, r.deadline,
        r.atRiskDays, r.exportStudentNumber ? 1 : 0, unitId]
     );
   }

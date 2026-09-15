@@ -17,19 +17,21 @@ class UnitStudentRepository extends BaseRepository {
   }
 
   // Enrol a student, carrying across the attributes the teacher supplied on the
-  // roster. Those fields still feed validateTeam (is_new_to_qut) and the
-  // find-teammates search (tutorial_time), so they must land here on join —
-  // the roster row itself is never read by those code paths.
+  // roster. tutorial_time still feeds validateTeam's fallback and the
+  // find-teammates search, so it must land here on join — the roster row
+  // itself is never read by those code paths.
+  //
+  // `is_new_to_qut` is a retired column on both tables: it was only ever an
+  // input to the removed new-to-QUT cap, so it is neither imported nor copied.
   enrollFromRoster(unitId, studentId, roster, fallbackName) {
     this.run(
       `INSERT INTO unit_students
-         (unit_id, student_id, name, tutorial_time, is_new_to_qut,
+         (unit_id, student_id, name, tutorial_time,
           degree, major, minor, units_passed, it_skill_groups)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?)`,
       [unitId, studentId,
        roster?.name || fallbackName || studentId,
        roster?.tutorial_time || '',
-       roster?.is_new_to_qut ? 1 : 0,
        roster?.degree || '', roster?.major || '', roster?.minor || '',
        parseInt(roster?.units_passed) || 0, roster?.it_skill_groups || '']
     );
@@ -79,14 +81,13 @@ class UnitStudentRepository extends BaseRepository {
   upsertImport(unitId, s) {
     this.run(
       `INSERT OR REPLACE INTO unit_students
-         (unit_id, student_id, name, tutorial_time, is_new_to_qut,
+         (unit_id, student_id, name, tutorial_time,
           degree, major, minor, units_passed, it_skill_groups)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+       VALUES (?,?,?,?,?,?,?,?,?)`,
       [
         unitId, s.student_id,
         s.name           || '',
         s.tutorial_time  || '',
-        ('1' === String(s.is_new_to_qut) || s.is_new_to_qut === true) ? 1 : 0,
         s.degree         || '',
         s.major          || '',
         s.minor          || '',
@@ -109,7 +110,7 @@ class UnitStudentRepository extends BaseRepository {
   // anyone's number in QUT systems, so it could only ever leak.
   listClassmates(unitId, excludeStudentId) {
     return this.all(
-      `SELECT us.student_id, us.name, us.tutorial_time, us.is_new_to_qut,
+      `SELECT us.student_id, us.name, us.tutorial_time,
               LOWER(TRIM(COALESCE(u.email, ''))) AS email,
               sup.tutorial_slots, sup.project_interests, sup.skills, sup.preferred_role,
               (SELECT tm.team_id FROM unit_team_members tm
@@ -139,7 +140,7 @@ class UnitStudentRepository extends BaseRepository {
   // (UnitService.buildExport) is the one sanctioned channel for it.
   listWithProgress(unitId) {
     return this.all(
-      `SELECT us.student_id, us.name, us.tutorial_time, us.is_new_to_qut,
+      `SELECT us.student_id, us.name, us.tutorial_time,
               us.degree, us.major, us.no_preference_at,
               LOWER(TRIM(COALESCE(u.email, ''))) AS email,
               COALESCE(sp.read_rules,          0) AS read_rules,

@@ -53,6 +53,7 @@
 </div>
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/student-nav.js"></script>
+<script src="/assets/js/team-sizes.js"></script>
 <script>
     (async () => {
         const nav = await initStudentNav({ activeItem: 'rules', pageTitle: 'Rules and Deadline' });
@@ -61,15 +62,13 @@
 
         const unit = await requireUnitAccess(unitId);
         if (!unit) return;
-        const sizes = (unit.valid_team_sizes || '4').split(',').map(s => s.trim());
-        const sizeRange = sizes.length > 1 ? `${sizes[0]}–${sizes[sizes.length-1]}` : sizes[0];
-
+        // "One team" and "shared tutorial" apply to every unit, so they are
+        // always listed.
         const rules = [
-            `Target team size: ${sizeRange} students (smaller groups can still be recorded)`,
-            unit.max_one_group   ? 'Every student can only be in one team'          : null,
-            unit.must_share_tutorial ? 'All members must share at least one tutorial' : null,
-            `Maximum ${unit.max_new_to_qut} new-to-QUT students in one team`
-        ].filter(Boolean);
+            `Target team size: ${sizeRangeLabel(unit.valid_team_sizes)} students (smaller groups can still be recorded)`,
+            'Every student can only be in one team',
+            'All members must share at least one tutorial'
+        ];
 
         document.getElementById('required-rules').innerHTML =
             rules.map(r => `<li>✓ ${r}</li>`).join('');

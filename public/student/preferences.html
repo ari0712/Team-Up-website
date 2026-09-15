@@ -12,7 +12,6 @@
         .pref-checkbox-grid label { display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer }
         .pref-radio-list { display:flex;flex-direction:column;gap:8px }
         .pref-radio-list label { display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer }
-        .pref-text-input { width:100%;border:1.5px solid #d0dff0;border-radius:8px;padding:10px 12px;font-size:14px;outline:none }
         .pref-layout { display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:28px 32px }
 
         /* Required / optional marking */
@@ -117,14 +116,6 @@
                         <label><input type="radio" name="role" value="Documentation Writer"> Documentation Writer</label>
                     </div>
                 </div>
-                <div class="pref-section" id="section-teammates">
-                    <div class="pref-head">
-                        <div class="pref-step-badge in-head">Step 5: Preferred Teammates</div>
-                        <span class="pref-flag optional">Optional</span>
-                    </div>
-                    <p style="font-size:13px;color:#555;margin-bottom:8px">Enter student names or IDs, separated by commas</p>
-                    <input type="text" id="preferred-teammates" class="pref-text-input" placeholder="e.g. Alex Tan, n12345678">
-                </div>
             </div>
         </div>
     </div>
@@ -201,7 +192,6 @@
             });
             const roleEl = document.querySelector(`input[name="role"][value="${prefs.preferred_role}"]`);
             if (roleEl) roleEl.checked = true;
-            document.getElementById('preferred-teammates').value = prefs.preferred_teammates === 'None' ? '' : (prefs.preferred_teammates || '');
         }
 
         // Last, so it also disables the tutorial checkboxes built above.
@@ -255,11 +245,10 @@
         const projectInterests  = [...document.querySelectorAll('input[name="interest"]:checked')].map(e => e.value);
         const skills            = [...document.querySelectorAll('input[name="skill"]:checked')].map(e => e.value);
         const preferredRole     = document.querySelector('input[name="role"]:checked')?.value || '';
-        const preferredTeammates = document.getElementById('preferred-teammates').value.trim() || 'None';
 
-        // Everything but preferred teammates is required. Checked before the
-        // request so nothing incomplete is sent; the server enforces the same
-        // rule for anything that bypasses this page.
+        // Every step is required. Checked before the request so nothing
+        // incomplete is sent; the server enforces the same rule for anything
+        // that bypasses this page.
         const missing = [];
         if (tutorialRequired && !tutorialSlots.length) missing.push(['tutorial', 'tutorial availability']);
         if (!projectInterests.length)                 missing.push(['interest', 'at least one project interest']);
@@ -280,7 +269,7 @@
 
         try {
             await post(`/api/student/units/${unitId}/prefs`,
-                { tutorialSlots, projectInterests, skills, preferredRole, preferredTeammates });
+                { tutorialSlots, projectInterests, skills, preferredRole });
             showMessage('success', 'Preferences saved successfully.');
         } catch (e) {
             // The team can be finalised while this page sits open, so the lock

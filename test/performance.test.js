@@ -16,11 +16,10 @@ describe('performance — semester-scale fixture', () => {
   before(async () => {
     h = await createHarness();
     teacher = h.createTeacher();
-    unitId = h.createUnit(teacher, { validTeamSizes: '4,5', maxNewToQut: 2 });
+    unitId = h.createUnit(teacher, { validTeamSizes: '4,5' });
 
     // 86 groups: sizes cycle 4,5,3,2 → ~305 students; every group shares one
-    // slot (plus a second slot for variety), ~15% new to QUT but never more
-    // than 2 per group. Then 20 solos, half declared.
+    // slot (plus a second slot for variety). Then 20 solos, half declared.
     let n = 0;
     const sizes = [4, 5, 3, 2];
     for (let g = 0; g < 86; g++) {
@@ -28,9 +27,8 @@ describe('performance — semester-scale fixture', () => {
       const slot = SLOTS[g % SLOTS.length];
       const members = [];
       for (let i = 0; i < size; i++) {
-        const newToQut = (n % 7 === 0 && i < 2) ? 1 : 0;   // at most 2 per group
         members.push(h.enrolStudent(unitId, {
-          username: `p${n++}`, slots: i % 2 ? `${slot},${SLOTS[(g + 1) % SLOTS.length]}` : slot, newToQut
+          username: `p${n++}`, slots: i % 2 ? `${slot},${SLOTS[(g + 1) % SLOTS.length]}` : slot
         }));
       }
       h.groupTogether(unitId, members);
@@ -50,7 +48,7 @@ describe('performance — semester-scale fixture', () => {
 
     time('getClassList',       () => h.unitService.getClassList(unitId, teacher));
     time('buildExport',        () => h.unitService.buildExport(unitId, teacher));
-    time('previewRulesImpact', () => h.unitService.previewRulesImpact(unitId, teacher, { maxNewToQut: 1 }));
+    time('previewRulesImpact', () => h.unitService.previewRulesImpact(unitId, teacher, { validTeamSizes: '3' }));
     time('getMyTeam',          () => h.studentPortalService.getMyTeam(unitId, 'p0'));
 
     // The request path, between two solos who share a slot: make solo2 share solo1's slot first.

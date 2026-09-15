@@ -279,6 +279,7 @@
 </div>
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/teacher-nav.js"></script>
+<script src="/assets/js/team-sizes.js"></script>
 <script>
     const params = new URLSearchParams(location.search);
     const unitId = params.get('unitId');
@@ -418,12 +419,10 @@
             ? [...slotSets[0]].filter(s => slotSets.every(set => set.has(s))) : [];
         const roles = members.map(m => m.preferred_role).filter(Boolean);
         const dup = roles.length !== new Set(roles).size;
-        const newCount = members.filter(m => m.is_new_to_qut).length;
-        const newOk = draft.meta.max_new_to_qut == null || newCount <= draft.meta.max_new_to_qut;
         // `bad` is a hard rule broken — the server will refuse it. Under target
         // is not in here: a group of 3 is a legitimate outcome.
-        const bad = overMax || !newOk || (draft.meta.must_share_tutorial && !shared.length);
-        return { sizeOk, overMax, shared, dup, newCount, newOk, bad };
+        const bad = overMax || (draft.meta.must_share_tutorial && !shared.length);
+        return { sizeOk, overMax, shared, dup, bad };
     }
 
     function renderOrganiser(title) {
@@ -444,10 +443,9 @@
                 <h4>${esc(g.label)} · ${g.members.length} members${t.seed
                     ? ` <span class="tf-org-lock">🔒 ${esc(t.seed)}</span>` : ''}</h4>
                 <div class="tf-org-reasons">
-                    <span class="tf-org-flag ${v.overMax ? 'warn' : 'ok'}">${v.overMax ? '! over max' : v.sizeOk ? '✓' : '·'} size ${g.members.length}${v.sizeOk || v.overMax ? '' : ' of ' + esc(draft.meta.valid_team_sizes || '4')}</span>
+                    <span class="tf-org-flag ${v.overMax ? 'warn' : 'ok'}">${v.overMax ? '! over max' : v.sizeOk ? '✓' : '·'} size ${g.members.length}${v.sizeOk || v.overMax ? '' : ' of ' + esc(sizeRangeLabel(draft.meta.valid_team_sizes))}</span>
                     <span class="tf-org-flag ${v.shared.length ? 'ok' : 'warn'}">${v.shared.length ? '✓ ' + esc(v.shared[0]) : '! no shared tutorial'}</span>
                     <span class="tf-org-flag ${v.dup ? 'warn' : 'ok'}">${v.dup ? '! repeated role' : '✓ distinct roles'}</span>
-                    <span class="tf-org-flag ${v.newOk ? 'ok' : 'warn'}">${v.newOk ? '✓' : '!'} ${v.newCount} new-to-QUT</span>
                 </div>
                 ${g.members.map(m => `
                     <div class="tf-org-member">
@@ -702,10 +700,6 @@
                         : v.tutorialShared ? `Members share ${v.sharedTutorials[0]}`
                         : 'No shared tutorial slot'}
                 </div>
-                <div class="tf-val-row">
-                    <div class="tf-dot ${violates(v, 'NEW_TO_QUT_CAP') ? 'tf-dot-red' : 'tf-dot-green'}"></div>
-                    ${statusMark(violates(v, 'NEW_TO_QUT_CAP') ? 'bad' : 'ok')} New-to-QUT students: ${v.newToQutCount} / ${v.maxNewToQut}
-                </div>
                 <button class="tf-view-btn" onclick="viewTeam('${team.team_id}')">View Team</button>
             </div>`;
     }
@@ -713,10 +707,7 @@
     // Size is advisory: under target is amber with the target named, over the
     // maximum is red. Only a broken hard rule turns a row red.
     const violates = (v, code) => (v.violations || []).some(x => x.code === code);
-    const targetLabel = () => {
-        const sizes = String(unitInfo?.valid_team_sizes || '4').split(',').map(s => s.trim()).filter(Boolean);
-        return sizes.length > 1 ? `${sizes[0]}–${sizes[sizes.length - 1]}` : sizes[0];
-    };
+    const targetLabel = () => sizeRangeLabel(unitInfo?.valid_team_sizes);
     const sizeDotClass = v => v.sizeState === 'COMPLETE' ? 'tf-dot-green'
         : v.sizeState === 'OVER_MAX' ? 'tf-dot-red' : 'tf-dot-amber';
     const sizeKind = v => v.sizeState === 'COMPLETE' ? 'ok' : v.sizeState === 'OVER_MAX' ? 'bad' : 'info';

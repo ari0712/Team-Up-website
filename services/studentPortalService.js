@@ -231,8 +231,8 @@ class StudentPortalService {
     return this.teams.findById(membership.team_id)?.status === 'FINALISED';
   }
 
-  // Everything except preferredTeammates is required. Enforced here rather than
-  // only in the page, because entering preferences marks a progress stage that
+  // Every field is required. Enforced here rather than only in the page,
+  // because entering preferences marks a progress stage that
   // the teacher's readiness view and the team-formation flow both trust — an
   // empty save used to set that flag and make a student look ready when the
   // data the matching depends on did not exist.
@@ -244,7 +244,7 @@ class StudentPortalService {
     if (this.arePrefsLocked(unitId, studentId))
       throw new ServiceError('PREFS_LOCKED', 403, 'PREFS_LOCKED');
 
-    const { tutorialSlots, projectInterests, skills, preferredRole, preferredTeammates } = body;
+    const { tutorialSlots, projectInterests, skills, preferredRole } = body;
     const csv = v => Array.isArray(v) ? v.join(',') : (v || '');
 
     const missing = [];
@@ -285,7 +285,6 @@ class StudentPortalService {
       projectInterests: csv(projectInterests),
       skills: csv(skills),
       preferredRole: preferredRole || '',
-      preferredTeammates: preferredTeammates || 'None',
       savedAt: new Date().toISOString()
     });
     this.progress.markEnteredPreferences(unitId, studentId);

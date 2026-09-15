@@ -250,10 +250,6 @@ body.t-page {
 
 /* Ruleset layout */
 .t-ruleset {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    grid-template-rows: auto auto;
-    gap: 12px;
     margin-bottom: 24px;
 }
 
@@ -270,45 +266,21 @@ body.t-page {
     margin-bottom: 8px;
 }
 
-/* Number grid (team size / qut) */
-.t-size-box { grid-column: 1; grid-row: 1; }
-.t-rule-right { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; gap: 12px; }
-.t-qut-box { grid-column: 1 / -1; grid-row: 2; }
-
-.t-num-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 60px);
-    gap: 4px;
-}
-
-.t-num-cell {
-    padding: 6px 10px;
-    font-size: 13px;
-    color: #1a2a4a;
-    cursor: pointer;
-    border-radius: 4px;
-    user-select: none;
-    transition: background 0.12s;
-}
-.t-num-cell:hover { background: #e8f0fe; }
-.t-num-cell.selected { font-weight: 700; color: #2663ff; }
-
-/* Toggle rule box */
-.t-toggle-box {
+/* Team size: a min–max pair of number fields */
+.t-size-range {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    cursor: pointer;
-    user-select: none;
-    font-size: 14px;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    font-size: 13px;
     color: #1a2a4a;
-    font-weight: 600;
-    gap: 12px;
 }
-.t-tick {
-    color: #2663ff;
-    font-size: 16px;
-    font-weight: 900;
+.t-size-input { width: 80px; }
+
+.t-rule-hint {
+    font-size: 12px;
+    color: #667;
+    margin: 10px 0 0;
 }
 
 /* Bottom row */
@@ -612,11 +584,30 @@ body.t-page {
 .t-modal-field { margin-bottom: 16px; }
 .t-modal-field label { display: block; font-size: 13px; font-weight: 700; color: #1a2a4a; margin-bottom: 6px; }
 .t-modal-field input[type="text"],
+.t-modal-field input[type="number"],
 .t-modal-field input[type="datetime-local"] {
     width: 100%; border: 1.5px solid #d0dff0; border-radius: 8px;
     padding: 9px 12px; font-size: 14px; outline: none; box-sizing: border-box;
 }
 .t-modal-field input:focus { border-color: #2663ff; }
+
+/* Deadline picker + its Confirm button (create page and both dialogs) */
+.t-deadline-block { flex: 1; }
+.t-deadline-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.t-deadline-row input[type="datetime-local"] { flex: 1; min-width: 200px; width: auto; }
+/* On the create page the label sits beside the field, so the row starts at the
+   top rather than centring on the note that appears underneath. */
+.t-field-row:has(.t-deadline-block) { align-items: flex-start; }
+.t-field-row:has(.t-deadline-block) .t-label { padding-top: 9px; }
+.t-deadline-confirm {
+    background: #2663ff; color: #fff; border: none; border-radius: 8px;
+    padding: 9px 16px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.t-deadline-confirm:hover { background: #1a4fcc; }
+.t-deadline-note { font-size: 12px; font-weight: 600; min-height: 16px; margin: 6px 0 0; }
+.t-deadline-note.ok      { color: #0a7d0a; }
+.t-deadline-note.error   { color: #e94560; }
+.t-deadline-note.pending { color: #5a7a9a; }
 .t-modal-toggle { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: #1a2a4a; }
 .t-modal-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
 .t-modal-actions { display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end; }

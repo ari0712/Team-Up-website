@@ -37,16 +37,6 @@ describe('team-up requests — rules are evaluated at the moment students act', 
     assert.equal(h.membersOf(unitId, a).length, 1);
   });
 
-  test('three new-to-QUT students cannot team up when the cap is 2', () => {
-    const unitId = h.createUnit(teacher, { maxNewToQut: 2 });
-    const [a, b, c] = [1, 2, 3].map(() => h.enrolStudent(unitId, { slots: 'Tue 10', newToQut: 1 }));
-    assert.equal(h.teamUp(unitId, a, b), 'approved');
-    const e = expectServiceError(
-      () => h.studentPortalService.sendRequest(unitId, c, h.teamOf(unitId, a).team_id), 400, 'RULE');
-    assert.match(e.message, /Maximum 2 new-to-QUT/);
-    assert.match(e.message, /3 of the 3 members/);
-  });
-
   test('over the largest allowed size is refused', () => {
     const unitId = h.createUnit(teacher, { validTeamSizes: '2' });
     const [a, b, c] = [1, 2, 3].map(() => h.enrolStudent(unitId));

@@ -84,6 +84,7 @@
 </div>
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/student-nav.js"></script>
+<script src="/assets/js/team-sizes.js"></script>
 <script>
     let allStudents = [], unitId, locked = false;
 
@@ -254,7 +255,7 @@
                 <button class="am-back" onclick="closeAutoMatch()">← Back to all students</button>
               </div>
               <p class="am-sub">Ranked by shared tutorial time, then role variety, then shared interests.
-                 Teams need ${esc(r.valid_team_sizes)} members. Sending a request still needs them to accept.</p>
+                 Teams need ${esc(sizeRangeLabel(r.valid_team_sizes))} members. Sending a request still needs them to accept.</p>
               ${list.length ? cards : `<p class="am-empty">${esc(r.why_empty || 'No suitable teams right now.')}</p>`}
             </div>`;
     }

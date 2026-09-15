@@ -68,6 +68,8 @@
 </div>
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/teacher-nav.js"></script>
+<script src="/assets/js/team-sizes.js"></script>
+<script src="/assets/js/deadline-confirm.js"></script>
 <script>
     const params = new URLSearchParams(location.search);
     const unitId = params.get('unitId');
@@ -104,13 +106,11 @@
             }
 
             // Build rules list from stored settings
-            const sizes = (u.valid_team_sizes || '4').split(',').map(Number).sort((a,b) => a-b);
             const rules = [];
-            if (sizes.length === 1) rules.push(`Target team size: ${sizes[0]} students (smaller groups can be recorded)`);
-            else rules.push(`Target team size: ${sizes[0]}–${sizes[sizes.length-1]} students (smaller groups can be recorded)`);
-            if (u.max_one_group)       rules.push('Every student can only be in one team');
-            if (u.must_share_tutorial) rules.push('All members must share at least one tutorial');
-            if (u.max_new_to_qut > 0) rules.push(`Maximum ${u.max_new_to_qut} new-to-QUT students in one team`);
+            rules.push(`Target team size: ${sizeRangeLabel(u.valid_team_sizes)} students (smaller groups can be recorded)`);
+            // These two apply to every unit; they are not configurable.
+            rules.push('Every student can only be in one team');
+            rules.push('All members must share at least one tutorial');
 
             // ?? not ||, so a stored 0 reads as "Never" rather than the default.
             const atRisk = u.at_risk_days ?? 3;
@@ -181,25 +181,36 @@
 
     function openEditRules(u) {
         currentUnit = u;
-        document.getElementById('er-sizes').value    = u.valid_team_sizes || '4';
-        document.getElementById('er-newqut').value   = u.max_new_to_qut   || 2;
-        document.getElementById('er-onegroup').checked = !!u.max_one_group;
-        document.getElementById('er-tutorial').checked = !!u.must_share_tutorial;
+        const range = rangeFromSizesCsv(u.valid_team_sizes);
+        document.getElementById('er-min').value = range.min;
+        document.getElementById('er-max').value = range.max;
         document.getElementById('er-exportnum').checked = u.export_student_number == 1;
         document.getElementById('er-deadline').value = toDatetimeLocal(u.deadline);
         // ?? not ||, because 0 ("Never") is a real stored value.
         document.getElementById('er-atrisk').value = String(u.at_risk_days ?? 3);
         document.getElementById('er-save-msg').textContent = '';
+        bindDeadlineConfirm('er-deadline', 'er-deadline-confirm', 'er-deadline-note');
         document.getElementById('editRulesModal').classList.add('open');
-        for (const id of ['er-sizes', 'er-newqut', 'er-tutorial'])
+        for (const id of ['er-min', 'er-max'])
             document.getElementById(id).oninput = document.getElementById(id).onchange = previewImpact;
         previewImpact();
+    }
+
+    // The size fields as entered, or null (with the reason) when they do not
+    // describe a range. Shared by the impact preview and the save.
+    function readSizeRange() {
+        const min = parseInt(document.getElementById('er-min').value, 10);
+        const max = parseInt(document.getElementById('er-max').value, 10);
+        if (!(min >= 1))   return { error: 'Minimum team size must be at least 1.' };
+        if (!(max >= min)) return { error: 'Maximum team size must be at least the minimum.' };
+        return { csv: sizesCsvFromRange(min, max) };
     }
 
     // ── Deadline-only dialog, reached straight from the banner ──────────
     function openEditDeadline(u) {
         currentUnit = u;
         document.getElementById('ed-deadline').value = toDatetimeLocal(u.deadline);
+        bindDeadlineConfirm('ed-deadline', 'ed-deadline-confirm', 'ed-deadline-note');
         const msg = document.getElementById('ed-save-msg');
         msg.textContent = '';
         msg.style.color = '';
@@ -242,11 +253,13 @@
     async function previewImpact() {
         const box = document.getElementById('er-impact');
         const seq = ++impactSeq;
-        const q = new URLSearchParams({
-            validTeamSizes:    document.getElementById('er-sizes').value.trim(),
-            maxNewToQut:       document.getElementById('er-newqut').value,
-            mustShareTutorial: document.getElementById('er-tutorial').checked
-        });
+        const range = readSizeRange();
+        if (range.error) {
+            box.style.display = 'block';
+            box.textContent = range.error;
+            return;
+        }
+        const q = new URLSearchParams({ validTeamSizes: range.csv });
         try {
             const impact = await get(`/api/units/${unitId}/rules/impact?${q}`);
             if (seq !== impactSeq) return;                      // a newer edit superseded this one
@@ -263,23 +276,28 @@
     }
 
     async function saveRules() {
+        const msg = document.getElementById('er-save-msg');
+        const range = readSizeRange();
+        if (range.error) {
+            msg.style.color = '#e94560';
+            msg.textContent = range.error;
+            return;
+        }
         const payload = {
-            validTeamSizes:    document.getElementById('er-sizes').value.trim(),
-            maxNewToQut:       parseInt(document.getElementById('er-newqut').value) || 2,
-            maxOneGroup:       document.getElementById('er-onegroup').checked,
-            mustShareTutorial: document.getElementById('er-tutorial').checked,
+            validTeamSizes:    range.csv,
             exportStudentNumber: document.getElementById('er-exportnum').checked,
             deadline:          document.getElementById('er-deadline').value,
             atRiskDays:        parseInt(document.getElementById('er-atrisk').value)
         };
         try {
             await put(`/api/units/${unitId}/rules`, payload);
-            document.getElementById('er-save-msg').textContent = 'Saved!';
+            msg.style.color = '';
+            msg.textContent = 'Saved!';
             setTimeout(closeEditRules, 800);
             await loadUnit();     // refresh the rules display on dashboard
         } catch(e) {
-            document.getElementById('er-save-msg').style.color = '#e94560';
-            document.getElementById('er-save-msg').textContent = e.message;
+            msg.style.color = '#e94560';
+            msg.textContent = e.message;
         }
     }
 
@@ -360,8 +378,12 @@
     <div class="t-modal-box">
         <h3>Edit Deadline</h3>
         <div class="t-modal-field">
-            <label>Team formation deadline</label>
-            <input type="datetime-local" id="ed-deadline">
+            <label for="ed-deadline">Team formation deadline</label>
+            <div class="t-deadline-row">
+                <input type="datetime-local" id="ed-deadline">
+                <button type="button" class="t-deadline-confirm" id="ed-deadline-confirm">Confirm</button>
+            </div>
+            <p class="t-deadline-note" id="ed-deadline-note"></p>
         </div>
         <p id="ed-save-msg" class="t-save-msg"></p>
         <div class="t-modal-actions">
@@ -376,24 +398,12 @@
     <div class="t-modal-box">
         <h3>Edit Rule Set</h3>
         <div class="t-modal-field">
-            <label>Valid Team Sizes (comma-separated, e.g. 4,5)</label>
-            <input type="text" id="er-sizes" placeholder="e.g. 4,5">
+            <label>Minimum Team Size</label>
+            <input type="number" id="er-min" min="1">
         </div>
         <div class="t-modal-field">
-            <label>Max New-to-QUT Students Per Team</label>
-            <input type="text" id="er-newqut" placeholder="e.g. 2">
-        </div>
-        <div class="t-modal-field">
-            <div class="t-modal-toggle">
-                <input type="checkbox" id="er-onegroup">
-                <label for="er-onegroup">Max one group per student</label>
-            </div>
-        </div>
-        <div class="t-modal-field">
-            <div class="t-modal-toggle">
-                <input type="checkbox" id="er-tutorial">
-                <label for="er-tutorial">Students must share tutorial time</label>
-            </div>
+            <label>Maximum Team Size</label>
+            <input type="number" id="er-max" min="1">
         </div>
         <div class="t-modal-field">
             <div class="t-modal-toggle">
@@ -405,8 +415,12 @@
                TeamUp is hosted — see the README.</p>
         </div>
         <div class="t-modal-field">
-            <label>Deadline</label>
-            <input type="datetime-local" id="er-deadline">
+            <label for="er-deadline">Deadline</label>
+            <div class="t-deadline-row">
+                <input type="datetime-local" id="er-deadline">
+                <button type="button" class="t-deadline-confirm" id="er-deadline-confirm">Confirm</button>
+            </div>
+            <p class="t-deadline-note" id="er-deadline-note"></p>
         </div>
         <div class="t-modal-field">
             <label for="er-atrisk">Flag students needing attention</label>

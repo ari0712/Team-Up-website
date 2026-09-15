@@ -112,9 +112,9 @@ Open `http://localhost:3000` to reach the portal-select page. From there you sig
 (or sign up) as a **Teacher** or a **Student**. Passwords are hashed with SHA-256.
 
 ### Teacher portal
-- **Create a unit** – name, semester, deadline, and team-formation rules
-  (valid team sizes, "max one group", "must share a tutorial", max students new to
-  the university per team).
+- **Create a unit** – name, semester, deadline, and the minimum / maximum team
+  size. Two rules apply to every unit and are not configurable: a student may be
+  in at most one group, and every group must share a tutorial.
 - **Import a class list** – bulk-import students from a parsed CSV when creating a unit.
 - **Progress dashboard** – per-unit aggregate counts across the student journey
   (read rules → entered preferences → grouped / declared / no activity → finalised).
@@ -132,8 +132,8 @@ Open `http://localhost:3000` to reach the portal-select page. From there you sig
   coordinator's opt-in export only; it is never shown to any student, including its owner.
 - **Browse & join units** – see available units and join one.
 - **Read the rules** for a unit and track progress through each stage.
-- **Set preferences** – tutorial slots, project interests, skills, preferred role,
-  preferred teammates (saved per unit).
+- **Set preferences** – tutorial slots, project interests, skills, preferred role
+  (saved per unit).
 - **Find teammates** – search classmates by **name** (tolerant of misspellings and partial
   input) or by a **full connect email you already have**; filter by tutorial, interest, or
   skill. A classmate's email is shown only when two results share a name.
@@ -281,12 +281,12 @@ stateDiagram-v2
 
 ### Team size is a target, not a gate
 
-`units.valid_team_sizes` (e.g. `4,5`) is the size the coordinator is aiming for in the
-final allocation. It does **not** stop a smaller group forming: a pair or trio who want
-to work together is a valid, incomplete record. What the server does refuse are the
-hard rules — no shared tutorial slot (when the unit requires one), more new-to-QUT
-students than the cap, or more members than the largest allowed size. See
-`utils/teamValidator.js`.
+The teacher enters a minimum and maximum team size; the browser expands that to the
+list `units.valid_team_sizes` stores (e.g. `4,5` — see `public/assets/js/team-sizes.js`).
+It is the size the coordinator is aiming for in the final allocation and does **not**
+stop a smaller group forming: a pair or trio who want to work together is a valid,
+incomplete record. What the server does refuse are the hard rules — no shared tutorial
+slot, or more members than the largest allowed size. See `utils/teamValidator.js`.
 
 A student who is alone can declare *"I have no preferred teammates — place me
 anywhere"* (`POST /api/student/units/:unitId/no-preference`). Every student then falls

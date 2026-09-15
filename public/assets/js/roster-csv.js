@@ -18,7 +18,6 @@ const ROSTER_COLUMNS = {
     name:            ['name', 'fullname', 'studentname'],
     student_number:  ['studentid', 'studentnumber', 'id'],
     tutorial_time:   ['tutorial', 'tutorialtime', 'tutorialslot', 'tutorialslots'],
-    is_new_to_qut:   ['newtoqut', 'isnewtoqut'],
     degree:          ['degree', 'course'],
     major:           ['major'],
     minor:           ['minor'],

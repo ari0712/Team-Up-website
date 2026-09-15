@@ -18,20 +18,22 @@ class PreferencesRepository extends BaseRepository {
     return row?.preferred_role || '';
   }
 
+  // `preferred_teammates` is a retired column: the free-text "preferred
+  // teammates" step was removed from the preferences page (team-up requests
+  // are how students choose each other). It keeps its table default.
   upsert(unitId, studentId, p) {
     this.run(
       `INSERT INTO student_unit_prefs
-         (unit_id, student_id, tutorial_slots, project_interests, skills, preferred_role, preferred_teammates, saved_at)
-       VALUES (?,?,?,?,?,?,?,?)
+         (unit_id, student_id, tutorial_slots, project_interests, skills, preferred_role, saved_at)
+       VALUES (?,?,?,?,?,?,?)
        ON CONFLICT(unit_id, student_id) DO UPDATE SET
          tutorial_slots=excluded.tutorial_slots,
          project_interests=excluded.project_interests,
          skills=excluded.skills,
          preferred_role=excluded.preferred_role,
-         preferred_teammates=excluded.preferred_teammates,
          saved_at=excluded.saved_at`,
       [unitId, studentId, p.tutorialSlots, p.projectInterests, p.skills,
-       p.preferredRole, p.preferredTeammates, p.savedAt]
+       p.preferredRole, p.savedAt]
     );
   }
 

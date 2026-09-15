@@ -99,7 +99,7 @@ class UnitService {
   createUnit(teacherId, body) {
     const {
       unitName, description, semester, deadline,
-      validTeamSizes, maxOneGroup, mustShareTutorial, maxNewToQut, students
+      validTeamSizes, students
     } = body;
 
     if (!unitName || !unitName.trim())
@@ -124,9 +124,9 @@ class UnitService {
       deadline: (deadline || '').trim(),
       createdBy: teacherId,
       validTeamSizes: (validTeamSizes || '4'),
-      maxOneGroup: maxOneGroup ? 1 : 0,
-      mustShareTutorial: mustShareTutorial ? 1 : 0,
-      maxNewToQut: parseInt(maxNewToQut) || 2,
+      // Mandatory for every unit, so the request body is not consulted.
+      maxOneGroup: 1,
+      mustShareTutorial: 1,
       studentCount
     });
 
@@ -287,8 +287,7 @@ class UnitService {
       const shaped = ids.map(sid => {
         const st = byId.get(sid);
         return { student_id: sid, name: st.name, status: 'ACCEPTED',
-                 tutorial_slots: st.tutorial_slots, tutorial_time: st.tutorial_time,
-                 is_new_to_qut: st.is_new_to_qut };
+                 tutorial_slots: st.tutorial_slots, tutorial_time: st.tutorial_time };
       });
       const v = validateTeam(shaped, unit, { includeAllAccepted: true, tutorialFallback: true });
       if (v.violations.length) {
@@ -419,12 +418,7 @@ class UnitService {
     const trial = {
       ...unit,
       valid_team_sizes:    proposed.validTeamSizes    !== undefined && proposed.validTeamSizes !== ''
-                             ? String(proposed.validTeamSizes) : unit.valid_team_sizes,
-      must_share_tutorial: proposed.mustShareTutorial !== undefined
-                             ? (proposed.mustShareTutorial === true || proposed.mustShareTutorial === 'true' || proposed.mustShareTutorial == 1 ? 1 : 0)
-                             : unit.must_share_tutorial,
-      max_new_to_qut:      proposed.maxNewToQut !== undefined && proposed.maxNewToQut !== ''
-                             ? parseInt(proposed.maxNewToQut) : unit.max_new_to_qut
+                             ? String(proposed.validTeamSizes) : unit.valid_team_sizes
     };
     if (proposed.validTeamSizes && parseTeamSizesCsv(String(proposed.validTeamSizes)) === null)
       throw new ServiceError('validTeamSizes must be comma-separated positive integers', 400);
@@ -533,7 +527,7 @@ class UnitService {
       if (!members.length) {
         teams.push({
           'Team': teamName, 'Team Status': STATUS_LABEL[t.status] || t.status, 'Size': '0', 'Shared Tutorial': shared,
-          'Member Name': '(no members)', ...identity(null), 'Role': '', 'New to QUT': '',
+          'Member Name': '(no members)', ...identity(null), 'Role': '',
           'Member Tutorials': ''
         });
         continue;
@@ -548,7 +542,6 @@ class UnitService {
           'Member Name': m.name || m.student_id,
           ...identity(s),
           'Role': m.role || '',
-          'New to QUT': m.is_new_to_qut == 1 ? 'Yes' : 'No',
           'Member Tutorials': m.tutorial_slots || m.tutorial_time || ''
         });
       }
@@ -568,7 +561,6 @@ class UnitService {
         'Team': s.team_name || '—',
         'Team size': `${s.team_size} of ${sizeLabel}`,
         'Preferences entered': s.entered_preferences == 1 ? 'Yes' : 'No',
-        'New to QUT': s.is_new_to_qut == 1 ? 'Yes' : 'No',
         'Tutorial Slots': s.tutorial_slots || s.tutorial_time || ''
       }));
 
@@ -621,8 +613,7 @@ class UnitService {
 
   updateRules(unitId, teacherId, body) {
     const unit = this._ownedOr404(unitId, teacherId);
-    const { validTeamSizes, maxOneGroup, mustShareTutorial, maxNewToQut, deadline,
-            atRiskDays, exportStudentNumber } = body;
+    const { validTeamSizes, deadline, atRiskDays, exportStudentNumber } = body;
 
     if (validTeamSizes !== undefined && parseTeamSizesCsv(validTeamSizes) === null)
       throw new ServiceError('validTeamSizes must be comma-separated positive integers', 400);
@@ -641,9 +632,9 @@ class UnitService {
 
     this.units.updateRules(unitId, {
       validTeamSizes:    validTeamSizes || unit.valid_team_sizes,
-      maxOneGroup:       maxOneGroup       !== undefined ? (maxOneGroup ? 1 : 0)       : unit.max_one_group,
-      mustShareTutorial: mustShareTutorial !== undefined ? (mustShareTutorial ? 1 : 0) : unit.must_share_tutorial,
-      maxNewToQut:       parseInt(maxNewToQut) || unit.max_new_to_qut,
+      // Mandatory for every unit — never taken from the request, never turned off.
+      maxOneGroup:       1,
+      mustShareTutorial: 1,
       deadline:          deadline || unit.deadline,
       atRiskDays:        resolvedAtRisk,
       exportStudentNumber: exportStudentNumber !== undefined
