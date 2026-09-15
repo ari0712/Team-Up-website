@@ -570,6 +570,54 @@ body.t-page {
     font-size: 11.5px;
 }
 
+/* ── Example student file: a spreadsheet mock-up (rosterExampleHtml) ── */
+.roster-example { margin-top: 10px; }
+.rx-scroll {
+    overflow-x: auto;
+    border: 1px solid #c6c6c6;
+    border-radius: 6px;
+    background: #fff;
+}
+.rx-sheet {
+    border-collapse: collapse;
+    font-family: Calibri, "Segoe UI", Arial, sans-serif;
+    font-size: 12.5px;
+    color: #1a1a1a;
+    white-space: nowrap;
+}
+.rx-sheet th, .rx-sheet td {
+    border: 1px solid #d4d4d4;
+    padding: 4px 10px;
+    text-align: left;
+    font-weight: 400;
+}
+/* Column letters across the top and row numbers down the side, the grey
+   chrome that says "this is a spreadsheet" at a glance. */
+.rx-sheet .rx-corner, .rx-sheet .rx-col, .rx-sheet .rx-row {
+    background: #f2f2f2;
+    color: #555;
+    font-weight: 600;
+    text-align: center;
+    padding: 3px 8px;
+}
+.rx-sheet .rx-row { min-width: 18px; }
+/* Row 1 is the header row the parser reads; the required column is tinted. */
+.rx-sheet .rx-head { font-weight: 700; background: #fafafa; }
+.rx-sheet .rx-required { background: #e8f0fe; color: #1a4fcc; }
+.rx-note { font-size: 12px; color: #5a7a9a; line-height: 1.5; margin: 8px 0 0; }
+.rx-note code {
+    background: #eef4fb; border: 1px solid #d0ddf0; border-radius: 4px;
+    padding: 1px 5px; font-size: 11.5px;
+}
+.rx-download { display: inline-block; margin-left: 6px; color: #2663ff; font-weight: 700; }
+
+/* Collapsed variant for the narrow Class List panel. */
+.roster-example-toggle { margin-top: 10px; }
+.roster-example-toggle summary {
+    cursor: pointer; font-size: 12px; font-weight: 700; color: #2663ff; user-select: none;
+}
+.roster-example-toggle summary:hover { text-decoration: underline; }
+
 .t-modal-overlay {
     display: none; position: fixed; inset: 0;
     background: rgba(0,0,0,0.45); z-index: 200;

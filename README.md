@@ -115,7 +115,10 @@ Open `http://localhost:3000` to reach the portal-select page. From there you sig
 - **Create a unit** – name, semester, deadline, and the minimum / maximum team
   size. Two rules apply to every unit and are not configurable: a student may be
   in at most one group, and every group must share a tutorial.
-- **Import a class list** – bulk-import students from a parsed CSV when creating a unit.
+- **Import a class list** – bulk-import students from a CSV when creating a unit (or
+  top it up later from Class List). Both pages show a spreadsheet-style example of the
+  file and link to a fillable template at `/assets/roster-template.csv`; only the
+  `email` column is required.
 - **Progress dashboard** – per-unit aggregate counts across the student journey
   (read rules → entered preferences → grouped / declared / no activity → finalised).
 - **Class list** – every enrolled student with their progress stages, placement

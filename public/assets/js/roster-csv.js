@@ -85,6 +85,51 @@ function parseRosterCsv(text) {
     };
 }
 
+// ── Example file ────────────────────────────────────────────────────────────
+// The header row is derived from ROSTER_COLUMNS above, so the example on the
+// page can never show a column the parser would ignore. The sample rows are
+// the same ones shipped in /assets/roster-template.csv — keep the two in step.
+const ROSTER_EXAMPLE_HEADERS = {
+    email: 'email', name: 'name', student_number: 'student id', tutorial_time: 'tutorial',
+    degree: 'degree', major: 'major', minor: 'minor', units_passed: 'units passed',
+    it_skill_groups: 'skills',
+};
+const ROSTER_EXAMPLE_ROWS = [
+    ['n1234567@qut.edu.au', 'Alex Tan',    'n1234567', 'Tue 10:00', 'Bachelor of IT', 'Computer Science', 'Data Science',      '12', 'Web Development'],
+    ['n7654321@qut.edu.au', 'Priya Nair',  'n7654321', 'Wed 14:00', 'Bachelor of IT', 'Information Systems', '',               '8',  'UI Design'],
+    ['n2468135@qut.edu.au', "Sam O'Brien", 'n2468135', 'Tue 10:00', 'Bachelor of IT', 'Computer Science', 'Cyber Security',    '16', 'Testing'],
+];
+
+const rosterEsc = v => String(v).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// A spreadsheet-style mock-up of an acceptable file: column letters, row
+// numbers, the header row exactly as accepted, then the sample rows.
+function rosterExampleHtml() {
+    const headers = Object.keys(ROSTER_COLUMNS).map(k => ROSTER_EXAMPLE_HEADERS[k] || k);
+    const letters = headers.map((_, i) => String.fromCharCode(65 + i));
+    const cell = (v, cls = '') => `<td${cls ? ` class="${cls}"` : ''}>${rosterEsc(v)}</td>`;
+
+    const colRow = `<tr><th class="rx-corner"></th>${letters.map(l => `<th class="rx-col">${l}</th>`).join('')}</tr>`;
+    const headRow = `<tr><th class="rx-row">1</th>${headers.map((h, i) =>
+        cell(h, 'rx-head' + (i === 0 ? ' rx-required' : ''))).join('')}</tr>`;
+    const dataRows = ROSTER_EXAMPLE_ROWS.map((r, n) =>
+        `<tr><th class="rx-row">${n + 2}</th>${r.map(v => cell(v)).join('')}</tr>`).join('');
+
+    return `
+        <div class="roster-example">
+            <div class="rx-scroll">
+                <table class="rx-sheet">${colRow}${headRow}${dataRows}</table>
+            </div>
+            <p class="rx-note">
+                Only <code>email</code> (column A) is required — leave any other column out or
+                empty. <code>tutorial</code> must match a slot name you set under Manage Tutorial
+                Slots, one per student. Save from Excel or Sheets as <strong>CSV</strong>.
+                <a class="rx-download" href="/assets/roster-template.csv" download>Download template (.csv)</a>
+            </p>
+        </div>`;
+}
+
 // One-line summary of a parse result, shared so both pages word it the same way.
 function rosterParseSummary(r) {
     if (r.error) return r.error;

@@ -93,10 +93,12 @@
             <button class="t-create-btn" onclick="doCreate()">Create</button>
         </div>
         <p class="t-csv-hint">
-            One column headed <code>email</code>, one address per row — these are the students
-            allowed to join. Optional columns are picked up when the header names them:
-            <code>name</code>, <code>student id</code>, <code>tutorial</code>, <code>degree</code>,
-            <code>major</code>, <code>minor</code>, <code>units passed</code>, <code>skills</code>.
+            The file lists the students allowed to join this unit — one per row, like this:
+        </p>
+        <!-- Filled by rosterExampleHtml() so the columns shown are exactly the
+             ones parseRosterCsv accepts. -->
+        <div id="roster-example"></div>
+        <p class="t-csv-hint">
             You can upload more files later from the Class List page to add students to this unit.
         </p>
         <div class="t-error" id="errorMsg"></div>
@@ -126,6 +128,7 @@
         if (!user) return;
         document.getElementById('teacherName').textContent = user.username;
         bindDeadlineConfirm('deadline', 'deadline-confirm', 'deadline-note');
+        document.getElementById('roster-example').innerHTML = rosterExampleHtml();
     })();
 
     function onCsvSelected(input) {

@@ -215,6 +215,12 @@
             <input type="file" id="rosterFile" accept=".csv" style="display:none"
                    onchange="onRosterFileSelected(this)">
             <p id="roster-file-msg" class="t-save-msg" style="text-align:left"></p>
+            <!-- Same mock-up as the Create Unit page (rosterExampleHtml), folded
+                 away because this panel is narrow. -->
+            <details class="roster-example-toggle">
+                <summary>See an example file</summary>
+                <div id="roster-example"></div>
+            </details>
         </div>
     </aside>
 </div>
@@ -250,6 +256,7 @@
         document.getElementById('teacherName').textContent = user.username;
         if (!unitId) { window.location = '/teacher/home.html'; return; }
         buildTeacherSidebar('class-list');
+        document.getElementById('roster-example').innerHTML = rosterExampleHtml();
         await Promise.all([loadStudents(), loadRoster()]);
     })();
 
