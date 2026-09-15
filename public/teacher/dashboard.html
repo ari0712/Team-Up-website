@@ -111,6 +111,8 @@
             // These two apply to every unit; they are not configurable.
             rules.push('Every student can only be in one team');
             rules.push('All members must share at least one tutorial');
+            // Optional: 0 / null means the unit does not use this rule.
+            if (u.max_new_to_qut > 0) rules.push(`Maximum ${u.max_new_to_qut} new-to-QUT students in one team`);
 
             // ?? not ||, so a stored 0 reads as "Never" rather than the default.
             const atRisk = u.at_risk_days ?? 3;
@@ -184,6 +186,11 @@
         const range = rangeFromSizesCsv(u.valid_team_sizes);
         document.getElementById('er-min').value = range.min;
         document.getElementById('er-max').value = range.max;
+        // The cap is optional: > 0 is active, 0 / null means the unit does not use it.
+        const capOn = u.max_new_to_qut > 0;
+        document.getElementById('er-capqut').checked = capOn;
+        document.getElementById('er-newqut').value = capOn ? u.max_new_to_qut : 2;
+        onErCapToggle();
         document.getElementById('er-exportnum').checked = u.export_student_number == 1;
         document.getElementById('er-deadline').value = toDatetimeLocal(u.deadline);
         // ?? not ||, because 0 ("Never") is a real stored value.
@@ -191,19 +198,30 @@
         document.getElementById('er-save-msg').textContent = '';
         bindDeadlineConfirm('er-deadline', 'er-deadline-confirm', 'er-deadline-note');
         document.getElementById('editRulesModal').classList.add('open');
-        for (const id of ['er-min', 'er-max'])
+        for (const id of ['er-min', 'er-max', 'er-capqut', 'er-newqut'])
             document.getElementById(id).oninput = document.getElementById(id).onchange = previewImpact;
+        document.getElementById('er-capqut').onchange = () => { onErCapToggle(); previewImpact(); };
         previewImpact();
     }
 
-    // The size fields as entered, or null (with the reason) when they do not
-    // describe a range. Shared by the impact preview and the save.
-    function readSizeRange() {
+    function onErCapToggle() {
+        document.getElementById('er-newqut-wrap').hidden = !document.getElementById('er-capqut').checked;
+    }
+
+    // The rule fields as entered, or the reason they do not describe a valid
+    // rule set. Shared by the impact preview and the save so the two agree.
+    function readRuleFields() {
         const min = parseInt(document.getElementById('er-min').value, 10);
         const max = parseInt(document.getElementById('er-max').value, 10);
         if (!(min >= 1))   return { error: 'Minimum team size must be at least 1.' };
         if (!(max >= min)) return { error: 'Maximum team size must be at least the minimum.' };
-        return { csv: sizesCsvFromRange(min, max) };
+        // null on the wire means "no cap" — the server stores 0.
+        let maxNewToQut = null;
+        if (document.getElementById('er-capqut').checked) {
+            maxNewToQut = parseInt(document.getElementById('er-newqut').value, 10);
+            if (!(maxNewToQut >= 1)) return { error: 'The new-to-QUT limit must be at least 1.' };
+        }
+        return { csv: sizesCsvFromRange(min, max), maxNewToQut };
     }
 
     // ── Deadline-only dialog, reached straight from the banner ──────────
@@ -253,13 +271,14 @@
     async function previewImpact() {
         const box = document.getElementById('er-impact');
         const seq = ++impactSeq;
-        const range = readSizeRange();
-        if (range.error) {
+        const fields = readRuleFields();
+        if (fields.error) {
             box.style.display = 'block';
-            box.textContent = range.error;
+            box.textContent = fields.error;
             return;
         }
-        const q = new URLSearchParams({ validTeamSizes: range.csv });
+        // '' in the query string is the server's "no cap" spelling.
+        const q = new URLSearchParams({ validTeamSizes: fields.csv, maxNewToQut: fields.maxNewToQut ?? '' });
         try {
             const impact = await get(`/api/units/${unitId}/rules/impact?${q}`);
             if (seq !== impactSeq) return;                      // a newer edit superseded this one
@@ -277,14 +296,15 @@
 
     async function saveRules() {
         const msg = document.getElementById('er-save-msg');
-        const range = readSizeRange();
-        if (range.error) {
+        const fields = readRuleFields();
+        if (fields.error) {
             msg.style.color = '#e94560';
-            msg.textContent = range.error;
+            msg.textContent = fields.error;
             return;
         }
         const payload = {
-            validTeamSizes:    range.csv,
+            validTeamSizes:    fields.csv,
+            maxNewToQut:       fields.maxNewToQut,
             exportStudentNumber: document.getElementById('er-exportnum').checked,
             deadline:          document.getElementById('er-deadline').value,
             atRiskDays:        parseInt(document.getElementById('er-atrisk').value)
@@ -404,6 +424,16 @@
         <div class="t-modal-field">
             <label>Maximum Team Size</label>
             <input type="number" id="er-max" min="1">
+        </div>
+        <div class="t-modal-field">
+            <div class="t-modal-toggle">
+                <input type="checkbox" id="er-capqut">
+                <label for="er-capqut">Limit new-to-QUT students per team</label>
+            </div>
+            <div id="er-newqut-wrap" style="margin-top:8px" hidden>
+                <label for="er-newqut">Maximum new-to-QUT students in one team</label>
+                <input type="number" id="er-newqut" min="1">
+            </div>
         </div>
         <div class="t-modal-field">
             <div class="t-modal-toggle">

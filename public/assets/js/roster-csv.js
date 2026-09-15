@@ -18,6 +18,9 @@ const ROSTER_COLUMNS = {
     name:            ['name', 'fullname', 'studentname'],
     student_number:  ['studentid', 'studentnumber', 'id'],
     tutorial_time:   ['tutorial', 'tutorialtime', 'tutorialslot', 'tutorialslots'],
+    // Always imported, whether or not the unit enforces a cap: the coordinator
+    // balances newcomers by hand during allocation and needs to see the flag.
+    is_new_to_qut:   ['newtoqut', 'isnewtoqut'],
     degree:          ['degree', 'course'],
     major:           ['major'],
     minor:           ['minor'],
@@ -91,13 +94,13 @@ function parseRosterCsv(text) {
 // the same ones shipped in /assets/roster-template.csv — keep the two in step.
 const ROSTER_EXAMPLE_HEADERS = {
     email: 'email', name: 'name', student_number: 'student id', tutorial_time: 'tutorial',
-    degree: 'degree', major: 'major', minor: 'minor', units_passed: 'units passed',
-    it_skill_groups: 'skills',
+    is_new_to_qut: 'new to QUT', degree: 'degree', major: 'major', minor: 'minor',
+    units_passed: 'units passed', it_skill_groups: 'skills',
 };
 const ROSTER_EXAMPLE_ROWS = [
-    ['n1234567@qut.edu.au', 'Alex Tan',    'n1234567', 'Tue 10:00', 'Bachelor of IT', 'Computer Science', 'Data Science',      '12', 'Web Development'],
-    ['n7654321@qut.edu.au', 'Priya Nair',  'n7654321', 'Wed 14:00', 'Bachelor of IT', 'Information Systems', '',               '8',  'UI Design'],
-    ['n2468135@qut.edu.au', "Sam O'Brien", 'n2468135', 'Tue 10:00', 'Bachelor of IT', 'Computer Science', 'Cyber Security',    '16', 'Testing'],
+    ['n1234567@qut.edu.au', 'Alex Tan',    'n1234567', 'Tue 10:00', 'Yes', 'Bachelor of IT', 'Computer Science',    'Data Science',   '12', 'Web Development'],
+    ['n7654321@qut.edu.au', 'Priya Nair',  'n7654321', 'Wed 14:00', 'No',  'Bachelor of IT', 'Information Systems', '',               '8',  'UI Design'],
+    ['n2468135@qut.edu.au', "Sam O'Brien", 'n2468135', 'Tue 10:00', 'No',  'Bachelor of IT', 'Computer Science',    'Cyber Security', '16', 'Testing'],
 ];
 
 const rosterEsc = v => String(v).replace(/[&<>"']/g, c =>
@@ -124,7 +127,8 @@ function rosterExampleHtml() {
             <p class="rx-note">
                 Only <code>email</code> (column A) is required — leave any other column out or
                 empty. <code>tutorial</code> must match a slot name you set under Manage Tutorial
-                Slots, one per student. Save from Excel or Sheets as <strong>CSV</strong>.
+                Slots, one per student. <code>new to QUT</code> is Yes/No. Save from Excel or
+                Sheets as <strong>CSV</strong>.
                 <a class="rx-download" href="/assets/roster-template.csv" download>Download template (.csv)</a>
             </p>
         </div>`;

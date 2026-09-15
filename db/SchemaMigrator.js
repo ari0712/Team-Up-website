@@ -97,10 +97,9 @@ class SchemaMigrator {
 
     // ── ADDITION 2: students imported from CSV per unit
     //
-    // `is_new_to_qut` here and on unit_roster, and `max_new_to_qut` on units,
-    // are RETIRED: the new-to-QUT cap was removed as a rule. The columns stay
-    // (existing databases have them and a column drop on the live sql.js file
-    // is not worth the risk) but nothing reads or writes them.
+    // `is_new_to_qut` (here and on unit_roster) is always imported and shown:
+    // the coordinator balances newcomers by hand. Whether it is also ENFORCED
+    // is per unit — `units.max_new_to_qut` > 0 is a cap, 0/NULL means no rule.
     db.run(`CREATE TABLE IF NOT EXISTS unit_students (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     unit_id          TEXT NOT NULL,
@@ -471,7 +470,7 @@ class SchemaMigrator {
     const units = new Map(all(`SELECT * FROM units`).map(u => [u.unit_id, u]));
     const rows = all(
       `SELECT t.unit_id, t.team_id, t.team_name, t.status,
-              tm.student_id, tm.status AS member_status, us.name,
+              tm.student_id, tm.status AS member_status, us.name, us.is_new_to_qut,
               sup.tutorial_slots, us.tutorial_time
          FROM unit_team_members tm
          INNER JOIN unit_teams t ON t.team_id = tm.team_id
@@ -483,7 +482,7 @@ class SchemaMigrator {
       if (!teams.has(r.team_id)) teams.set(r.team_id, { unit_id: r.unit_id, team_id: r.team_id, team_name: r.team_name, status: r.status, members: [] });
       teams.get(r.team_id).members.push({
         student_id: r.student_id, status: r.member_status, name: r.name,
-        tutorial_slots: r.tutorial_slots, tutorial_time: r.tutorial_time
+        is_new_to_qut: r.is_new_to_qut, tutorial_slots: r.tutorial_slots, tutorial_time: r.tutorial_time
       });
     }
     const broken = [];
@@ -521,13 +520,13 @@ class SchemaMigrator {
     const now = new Date().toISOString();
     db.run(
       `INSERT OR IGNORE INTO unit_roster
-         (unit_id, email, name, student_number, tutorial_time,
+         (unit_id, email, name, student_number, tutorial_time, is_new_to_qut,
           degree, major, minor, units_passed, it_skill_groups, invited_at)
        SELECT us.unit_id,
               LOWER(TRIM(u.email)),
               us.name,
               COALESCE(u.student_id, ''),
-              us.tutorial_time,
+              us.tutorial_time, us.is_new_to_qut,
               us.degree, us.major, us.minor, us.units_passed, us.it_skill_groups,
               ?
          FROM unit_students us

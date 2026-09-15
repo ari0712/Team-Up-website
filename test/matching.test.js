@@ -74,14 +74,21 @@ describe('matcher — feasible OPEN groups are never split; infeasible ones are 
     const h2 = await createHarness();
     try {
       const t2 = h2.createTeacher();
-      const u2 = h2.createUnit(t2, { validTeamSizes: '4' });
-      const me = h2.enrolStudent(u2, { slots: 'Tue 10' });
+      const u2 = h2.createUnit(t2, { validTeamSizes: '4', maxNewToQut: 1 });
+      const me = h2.enrolStudent(u2, { slots: 'Tue 10', newToQut: 1 });
       const okMate = h2.enrolStudent(u2, { slots: 'Tue 10' });
+      const newMate = h2.enrolStudent(u2, { slots: 'Tue 10', newToQut: 1 });   // would breach the cap
       const farMate = h2.enrolStudent(u2, { slots: 'Wed 2' });                 // no shared slot
       const s = h2.studentPortalService.autoMatch(u2, me);
       const ids = s.suggestions.flatMap(x => x.members.map(m => m.student_id));
       assert.ok(ids.includes(okMate));
+      assert.ok(!ids.includes(newMate));
       assert.ok(!ids.includes(farMate));
+
+      // Same people, cap switched off: the newcomer is offered.
+      h2.unitService.updateRules(u2, t2, { maxNewToQut: null });
+      const s2 = h2.studentPortalService.autoMatch(u2, me);
+      assert.ok(s2.suggestions.flatMap(x => x.members.map(m => m.student_id)).includes(newMate));
     } finally { h2.close(); }
   });
 });

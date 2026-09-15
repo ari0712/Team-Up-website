@@ -283,6 +283,17 @@ body.t-page {
     margin: 10px 0 0;
 }
 
+/* Optional rule row: checkbox + label, with the number field appearing beside
+   it only while the box is ticked. */
+.t-rule-toggle {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px;
+    margin-top: 12px; padding-top: 12px; border-top: 1px solid #e0ecf8;
+    font-size: 13px; color: #1a2a4a;
+}
+.t-rule-toggle-label { display: flex; align-items: center; gap: 8px; font-weight: 700; cursor: pointer; }
+.t-rule-toggle-label input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.t-rule-toggle-num { display: inline-flex; align-items: center; gap: 8px; }
+
 /* Bottom row */
 .t-bottom-row {
     display: flex;

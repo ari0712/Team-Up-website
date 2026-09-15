@@ -419,10 +419,15 @@
             ? [...slotSets[0]].filter(s => slotSets.every(set => set.has(s))) : [];
         const roles = members.map(m => m.preferred_role).filter(Boolean);
         const dup = roles.length !== new Set(roles).size;
+        // The count is always shown — the coordinator balances newcomers by
+        // hand — but it is only a RULE when the unit sets a cap (null = none).
+        const cap = draft.meta.max_new_to_qut;
+        const newCount = members.filter(m => m.is_new_to_qut).length;
+        const newOk = cap == null || newCount <= cap;
         // `bad` is a hard rule broken — the server will refuse it. Under target
         // is not in here: a group of 3 is a legitimate outcome.
-        const bad = overMax || (draft.meta.must_share_tutorial && !shared.length);
-        return { sizeOk, overMax, shared, dup, bad };
+        const bad = overMax || !newOk || (draft.meta.must_share_tutorial && !shared.length);
+        return { sizeOk, overMax, shared, dup, cap, newCount, newOk, bad };
     }
 
     function renderOrganiser(title) {
@@ -446,6 +451,7 @@
                     <span class="tf-org-flag ${v.overMax ? 'warn' : 'ok'}">${v.overMax ? '! over max' : v.sizeOk ? '✓' : '·'} size ${g.members.length}${v.sizeOk || v.overMax ? '' : ' of ' + esc(sizeRangeLabel(draft.meta.valid_team_sizes))}</span>
                     <span class="tf-org-flag ${v.shared.length ? 'ok' : 'warn'}">${v.shared.length ? '✓ ' + esc(v.shared[0]) : '! no shared tutorial'}</span>
                     <span class="tf-org-flag ${v.dup ? 'warn' : 'ok'}">${v.dup ? '! repeated role' : '✓ distinct roles'}</span>
+                    <span class="tf-org-flag ${v.newOk ? 'ok' : 'warn'}">${v.newOk ? '·' : '!'} ${v.newCount} new-to-QUT${v.cap == null ? '' : ' of ' + v.cap}</span>
                 </div>
                 ${g.members.map(m => `
                     <div class="tf-org-member">
@@ -700,6 +706,11 @@
                         : v.tutorialShared ? `Members share ${v.sharedTutorials[0]}`
                         : 'No shared tutorial slot'}
                 </div>
+                ${v.maxNewToQut == null ? '' : `
+                <div class="tf-val-row">
+                    <div class="tf-dot ${violates(v, 'NEW_TO_QUT_CAP') ? 'tf-dot-red' : 'tf-dot-green'}"></div>
+                    ${statusMark(violates(v, 'NEW_TO_QUT_CAP') ? 'bad' : 'ok')} New-to-QUT students: ${v.newToQutCount} / ${v.maxNewToQut}
+                </div>`}
                 <button class="tf-view-btn" onclick="viewTeam('${team.team_id}')">View Team</button>
             </div>`;
     }

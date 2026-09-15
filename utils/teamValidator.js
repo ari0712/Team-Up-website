@@ -4,10 +4,11 @@
 // Two kinds of outcome, and they are deliberately not the same thing:
 //
 //   VIOLATIONS  — hard fails. The unit's rules that must actually hold: a
-//                 shared tutorial slot (when the unit requires one) and the
-//                 largest allowed size. A team with either cannot be submitted
-//                 or applied, and the UI shows the rule and why this team
-//                 breaks it.
+//                 shared tutorial slot (when the unit requires one), the
+//                 new-to-QUT cap (when the unit sets one — see newToQutCap),
+//                 and the largest allowed size. A team with any of these
+//                 cannot be submitted or applied, and the UI shows the rule
+//                 and why this team breaks it.
 //
 //   sizeState   — advisory. `valid_team_sizes` is the TARGET for the final
 //                 allocation, not a gate. A group of 2 or 3 is a valid,
@@ -27,6 +28,14 @@ const { parseTeamSizesCsv } = require('./teamSizes');
 
 const nameOf = m => (m.name && String(m.name).trim()) || m.student_id;
 
+// The unit's new-to-QUT cap as a positive integer, or null when the unit does
+// not enforce one (0, NULL, absent). The one place this is decided: the
+// matcher, the services and the pages all ask here rather than re-deriving.
+function newToQutCap(unit) {
+  const n = parseInt(unit?.max_new_to_qut);
+  return n > 0 ? n : null;
+}
+
 function validateTeam(members, unit, { tutorialFallback = false, includeAllAccepted = false } = {}) {
   const acceptedMembers = members.filter(m => m.status === 'ACCEPTED');
   const targetSizes = (parseTeamSizesCsv(unit.valid_team_sizes) || [4]).slice().sort((a, b) => a - b);
@@ -43,6 +52,12 @@ function validateTeam(members, unit, { tutorialFallback = false, includeAllAccep
     computedShared = [...slotSets[0]].filter(slot => slotSets.every(s => s.has(slot)));
   }
   const sharedTutorials = computedShared || [];
+
+  // The count is always reported — the coordinator reads it even in units that
+  // set no cap. Only the violation depends on the cap.
+  const newToQutCount = members.filter(m => m.is_new_to_qut == 1).length;
+  const maxNewToQut = newToQutCap(unit);
+  const newToQutRequired = maxNewToQut !== null;
 
   // ── Size: advisory unless over the maximum ──
   let sizeState, needed = 0;
@@ -74,6 +89,15 @@ function validateTeam(members, unit, { tutorialFallback = false, includeAllAccep
     });
   }
 
+  // Only a rule when the unit sets a cap; units without one never see a row.
+  if (newToQutRequired && newToQutCount > maxNewToQut) {
+    violations.push({
+      code: 'NEW_TO_QUT_CAP',
+      rule: `Maximum ${maxNewToQut} new-to-QUT student${maxNewToQut === 1 ? '' : 's'} per team`,
+      why: `${newToQutCount} of the ${size} member${size === 1 ? '' : 's'} ${newToQutCount === 1 ? 'is' : 'are'} new to QUT`
+    });
+  }
+
   if (sizeState === 'OVER_MAX') {
     violations.push({
       code: 'OVER_MAX_SIZE',
@@ -91,12 +115,16 @@ function validateTeam(members, unit, { tutorialFallback = false, includeAllAccep
       ? sharedTutorials.length > 0
       : (computedShared && computedShared.length > 0),
     sharedTutorials,
+    newToQutOk:     !newToQutRequired || newToQutCount <= maxNewToQut,
+    newToQutCount,
+    maxNewToQut,            // null when the unit sets no cap
     // The violation / advisory split.
     size,
     targetSizes,
     sizeState,
     needed,
     tutorialRequired,
+    newToQutRequired,
     violations,
     solo,
     // A group is submittable when it breaks no hard rule and is actually a
@@ -119,4 +147,4 @@ function targetSizeLabel(unit) {
   return sizes.length > 1 ? `${sizes[0]}–${sizes[sizes.length - 1]}` : String(sizes[0]);
 }
 
-module.exports = { validateTeam, targetSizeLabel };
+module.exports = { validateTeam, targetSizeLabel, newToQutCap };

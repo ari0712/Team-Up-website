@@ -18,6 +18,20 @@ function csvRemove(csv, label) {
   return csv.split(',').map(s => s.trim()).filter(s => s && s !== label).join(',');
 }
 
+// The new-to-QUT cap as sent by a page. The rule is optional per unit, so
+// "off" has to be expressible on the wire: null, '', 0 and false all mean
+// "no cap" and are stored as 0. A positive integer is the cap. `undefined`
+// is returned as-is so callers can distinguish "not sent" (keep what is
+// stored on update; off on create) from an explicit "off".
+function parseNewToQutCap(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '' || value === false || value === 0 || value === '0') return 0;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1)
+    throw new ServiceError('maxNewToQut must be a positive whole number, or empty to turn the rule off', 400);
+  return n;
+}
+
 // Orchestrates the teacher unit-management surface: units, class lists, progress,
 // the coordinator's overrides, the export and tutorial slots.
 // Business rules and ownership checks live here; routes stay thin.
@@ -99,13 +113,15 @@ class UnitService {
   createUnit(teacherId, body) {
     const {
       unitName, description, semester, deadline,
-      validTeamSizes, students
+      validTeamSizes, maxNewToQut, students
     } = body;
 
     if (!unitName || !unitName.trim())
       throw new ServiceError('Unit name is required', 400);
     if (validTeamSizes !== undefined && parseTeamSizesCsv(validTeamSizes) === null)
       throw new ServiceError('validTeamSizes must be comma-separated positive integers', 400);
+    // Off unless the coordinator opted in — most units never use this rule.
+    const newToQutCap = parseNewToQutCap(maxNewToQut) ?? 0;
 
     const unitId = crypto.randomUUID();
 
@@ -127,6 +143,7 @@ class UnitService {
       // Mandatory for every unit, so the request body is not consulted.
       maxOneGroup: 1,
       mustShareTutorial: 1,
+      maxNewToQut: newToQutCap,
       studentCount
     });
 
@@ -287,7 +304,8 @@ class UnitService {
       const shaped = ids.map(sid => {
         const st = byId.get(sid);
         return { student_id: sid, name: st.name, status: 'ACCEPTED',
-                 tutorial_slots: st.tutorial_slots, tutorial_time: st.tutorial_time };
+                 tutorial_slots: st.tutorial_slots, tutorial_time: st.tutorial_time,
+                 is_new_to_qut: st.is_new_to_qut };
       });
       const v = validateTeam(shaped, unit, { includeAllAccepted: true, tutorialFallback: true });
       if (v.violations.length) {
@@ -415,10 +433,13 @@ class UnitService {
   // finalise time. The save itself is not blocked — the coordinator decides.
   previewRulesImpact(unitId, teacherId, proposed = {}) {
     const unit = this._ownedOr404(unitId, teacherId);
+    // Same wire contract as updateRules: undefined keeps the stored cap, ''/null/0 turn it off.
+    const proposedCap = parseNewToQutCap(proposed.maxNewToQut);
     const trial = {
       ...unit,
       valid_team_sizes:    proposed.validTeamSizes    !== undefined && proposed.validTeamSizes !== ''
-                             ? String(proposed.validTeamSizes) : unit.valid_team_sizes
+                             ? String(proposed.validTeamSizes) : unit.valid_team_sizes,
+      max_new_to_qut:      proposedCap !== undefined ? proposedCap : unit.max_new_to_qut
     };
     if (proposed.validTeamSizes && parseTeamSizesCsv(String(proposed.validTeamSizes)) === null)
       throw new ServiceError('validTeamSizes must be comma-separated positive integers', 400);
@@ -527,7 +548,7 @@ class UnitService {
       if (!members.length) {
         teams.push({
           'Team': teamName, 'Team Status': STATUS_LABEL[t.status] || t.status, 'Size': '0', 'Shared Tutorial': shared,
-          'Member Name': '(no members)', ...identity(null), 'Role': '',
+          'Member Name': '(no members)', ...identity(null), 'Role': '', 'New to QUT': '',
           'Member Tutorials': ''
         });
         continue;
@@ -542,6 +563,9 @@ class UnitService {
           'Member Name': m.name || m.student_id,
           ...identity(s),
           'Role': m.role || '',
+          // Always exported, whether or not the unit caps it: the coordinator
+          // balances newcomers by hand during allocation.
+          'New to QUT': m.is_new_to_qut == 1 ? 'Yes' : 'No',
           'Member Tutorials': m.tutorial_slots || m.tutorial_time || ''
         });
       }
@@ -561,6 +585,7 @@ class UnitService {
         'Team': s.team_name || '—',
         'Team size': `${s.team_size} of ${sizeLabel}`,
         'Preferences entered': s.entered_preferences == 1 ? 'Yes' : 'No',
+        'New to QUT': s.is_new_to_qut == 1 ? 'Yes' : 'No',
         'Tutorial Slots': s.tutorial_slots || s.tutorial_time || ''
       }));
 
@@ -613,10 +638,13 @@ class UnitService {
 
   updateRules(unitId, teacherId, body) {
     const unit = this._ownedOr404(unitId, teacherId);
-    const { validTeamSizes, deadline, atRiskDays, exportStudentNumber } = body;
+    const { validTeamSizes, maxNewToQut, deadline, atRiskDays, exportStudentNumber } = body;
 
     if (validTeamSizes !== undefined && parseTeamSizesCsv(validTeamSizes) === null)
       throw new ServiceError('validTeamSizes must be comma-separated positive integers', 400);
+    // Not sent (the deadline-only save) keeps the stored cap; an explicit
+    // empty value turns the rule off. See parseNewToQutCap.
+    const newToQutCap = parseNewToQutCap(maxNewToQut);
 
     // Only the offered choices are storable. 0 is a real value here ("never"),
     // so this is checked explicitly rather than relying on truthiness — the
@@ -635,6 +663,7 @@ class UnitService {
       // Mandatory for every unit — never taken from the request, never turned off.
       maxOneGroup:       1,
       mustShareTutorial: 1,
+      maxNewToQut:       newToQutCap !== undefined ? newToQutCap : (unit.max_new_to_qut ?? 0),
       deadline:          deadline || unit.deadline,
       atRiskDays:        resolvedAtRisk,
       exportStudentNumber: exportStudentNumber !== undefined

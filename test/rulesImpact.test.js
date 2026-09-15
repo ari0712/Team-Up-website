@@ -1,6 +1,6 @@
 const { test, describe, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { createHarness } = require('./helpers/harness');
+const { createHarness, expectServiceError } = require('./helpers/harness');
 
 // A recorded group can be put in breach by teacher-side edits. Two things
 // must then be true: the student learns it on My Team with the rule named,
@@ -49,6 +49,52 @@ describe('rules can change under a recorded group', () => {
     impact = h.unitService.previewRulesImpact(unitId, teacher, { validTeamSizes: '3,4' });
     assert.equal(impact.length, 0);
     void solo;
+  });
+
+  test('the new-to-QUT cap is optional per unit: preview, tighten, and switch off', () => {
+    const unitId = h.createUnit(teacher, { maxNewToQut: 2 });
+    assert.equal(h.repos.unitRepo.findById(unitId).max_new_to_qut, 2);
+    const a = h.enrolStudent(unitId, { newToQut: 1 }), b = h.enrolStudent(unitId, { newToQut: 1 });
+    h.teamUp(unitId, a, b);                                             // 2 of 2 — fine
+    const c = h.enrolStudent(unitId), d = h.enrolStudent(unitId);
+    h.teamUp(unitId, c, d);
+
+    let impact = h.unitService.previewRulesImpact(unitId, teacher, { maxNewToQut: 1 });
+    assert.equal(impact.length, 1);
+    assert.equal(impact[0].team_id, h.teamOf(unitId, a).team_id);
+    assert.equal(impact[0].violations[0].code, 'NEW_TO_QUT_CAP');
+    // '' is how the query string spells "no cap"; null is how JSON does.
+    for (const off of ['', null, 0])
+      assert.equal(h.unitService.previewRulesImpact(unitId, teacher, { maxNewToQut: off }).length, 0);
+    // Nothing was saved by previewing.
+    assert.equal(h.repos.unitRepo.findById(unitId).max_new_to_qut, 2);
+
+    h.unitService.updateRules(unitId, teacher, { maxNewToQut: 1 });
+    let view = h.studentPortalService.getMyTeam(unitId, a);
+    assert.equal(view.validation.violations[0].code, 'NEW_TO_QUT_CAP');
+    assert.equal(view.validation.maxNewToQut, 1);
+
+    // A deadline-only save must not touch the cap.
+    h.unitService.updateRules(unitId, teacher, { deadline: '2030-01-01T09:00' });
+    assert.equal(h.repos.unitRepo.findById(unitId).max_new_to_qut, 1);
+
+    // Switching it off clears the violation and the rule disappears from the view.
+    h.unitService.updateRules(unitId, teacher, { maxNewToQut: null });
+    assert.equal(h.repos.unitRepo.findById(unitId).max_new_to_qut, 0);
+    view = h.studentPortalService.getMyTeam(unitId, a);
+    assert.deepEqual(view.validation.violations, []);
+    assert.equal(view.validation.maxNewToQut, null);
+    assert.equal(view.validation.newToQutCount, 2);                      // the flag itself is still there
+
+    expectServiceError(() => h.unitService.updateRules(unitId, teacher, { maxNewToQut: -1 }), 400);
+    expectServiceError(() => h.unitService.updateRules(unitId, teacher, { maxNewToQut: 'two' }), 400);
+  });
+
+  test('a new unit has the cap off unless the coordinator opts in', () => {
+    const off = h.createUnit(teacher);
+    assert.equal(h.repos.unitRepo.findById(off).max_new_to_qut, 0);
+    const on = h.createUnit(teacher, { maxNewToQut: 3 });
+    assert.equal(h.repos.unitRepo.findById(on).max_new_to_qut, 3);
   });
 
   test('"one group" and "shared tutorial" are always on — the request body cannot switch them off', () => {

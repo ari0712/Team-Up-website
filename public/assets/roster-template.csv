@@ -1,4 +1,4 @@
-email,name,student id,tutorial,degree,major,minor,units passed,skills
-n1234567@qut.edu.au,Alex Tan,n1234567,Tue 10:00,Bachelor of IT,Computer Science,Data Science,12,Web Development
-n7654321@qut.edu.au,Priya Nair,n7654321,Wed 14:00,Bachelor of IT,Information Systems,,8,UI Design
-n2468135@qut.edu.au,Sam O'Brien,n2468135,Tue 10:00,Bachelor of IT,Computer Science,Cyber Security,16,Testing
+email,name,student id,tutorial,new to QUT,degree,major,minor,units passed,skills
+n1234567@qut.edu.au,Alex Tan,n1234567,Tue 10:00,Yes,Bachelor of IT,Computer Science,Data Science,12,Web Development
+n7654321@qut.edu.au,Priya Nair,n7654321,Wed 14:00,No,Bachelor of IT,Information Systems,,8,UI Design
+n2468135@qut.edu.au,Sam O'Brien,n2468135,Tue 10:00,No,Bachelor of IT,Computer Science,Cyber Security,16,Testing

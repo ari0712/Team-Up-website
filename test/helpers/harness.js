@@ -55,10 +55,11 @@ async function createHarness() {
     },
 
     createUnit(teacherId, {
-      unitName = next('Unit '), validTeamSizes = '4', deadline = '', atRiskDays
+      unitName = next('Unit '), validTeamSizes = '4', maxNewToQut, deadline = '', atRiskDays
     } = {}) {
+      // maxNewToQut left undefined = the cap is off, as it is for a new unit.
       const { unitId } = unitService.createUnit(teacherId, {
-        unitName, validTeamSizes, deadline, students: []
+        unitName, validTeamSizes, maxNewToQut, deadline, students: []
       });
       if (atRiskDays !== undefined) unitService.updateRules(unitId, teacherId, { atRiskDays });
       return unitId;
@@ -69,7 +70,7 @@ async function createHarness() {
     // student has availability whichever fallback a reader uses.
     enrolStudent(unitId, {
       username = next('s'), name = username, studentNumber = '', slots = 'Tue 10',
-      prefs = true, role = 'Developer', interests = 'Web', skills = 'JS'
+      newToQut = 0, prefs = true, role = 'Developer', interests = 'Web', skills = 'JS'
     } = {}) {
       const email = `${username}@example.edu`;
       if (!repos.userRepo.existsByUsername(username)) {
@@ -78,7 +79,7 @@ async function createHarness() {
       }
       const unit = repos.unitRepo.findById(unitId);
       unitService.importRoster(unitId, unit.created_by, [
-        { email, name, tutorial_time: slots }
+        { email, name, tutorial_time: slots, is_new_to_qut: newToQut ? 1 : 0 }
       ]);
       studentPortalService.joinUnit(unitId, username);
       if (prefs) {

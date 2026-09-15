@@ -112,13 +112,17 @@ Open `http://localhost:3000` to reach the portal-select page. From there you sig
 (or sign up) as a **Teacher** or a **Student**. Passwords are hashed with SHA-256.
 
 ### Teacher portal
-- **Create a unit** – name, semester, deadline, and the minimum / maximum team
-  size. Two rules apply to every unit and are not configurable: a student may be
-  in at most one group, and every group must share a tutorial.
+- **Create a unit** – name, semester, deadline, the minimum / maximum team size,
+  and an optional cap on new-to-QUT students per team (off unless the coordinator
+  switches it on; `units.max_new_to_qut` of 0 means no rule). Two rules apply to
+  every unit and are not configurable: a student may be in at most one group, and
+  every group must share a tutorial.
 - **Import a class list** – bulk-import students from a CSV when creating a unit (or
   top it up later from Class List). Both pages show a spreadsheet-style example of the
   file and link to a fillable template at `/assets/roster-template.csv`; only the
-  `email` column is required.
+  `email` column is required. The `new to QUT` column is always imported, shown in
+  the class list and exported — whether or not the unit enforces a cap on it — so
+  the coordinator can balance newcomers by hand during allocation.
 - **Progress dashboard** – per-unit aggregate counts across the student journey
   (read rules → entered preferences → grouped / declared / no activity → finalised).
 - **Class list** – every enrolled student with their progress stages, placement
@@ -289,7 +293,8 @@ list `units.valid_team_sizes` stores (e.g. `4,5` — see `public/assets/js/team-
 It is the size the coordinator is aiming for in the final allocation and does **not**
 stop a smaller group forming: a pair or trio who want to work together is a valid,
 incomplete record. What the server does refuse are the hard rules — no shared tutorial
-slot, or more members than the largest allowed size. See `utils/teamValidator.js`.
+slot, more new-to-QUT students than the cap (when the unit sets one), or more members
+than the largest allowed size. See `utils/teamValidator.js`.
 
 A student who is alone can declare *"I have no preferred teammates — place me
 anywhere"* (`POST /api/student/units/:unitId/no-preference`). Every student then falls

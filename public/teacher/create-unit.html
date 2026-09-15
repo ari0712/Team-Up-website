@@ -77,6 +77,18 @@
                 </div>
                 <p class="t-rule-hint">Every student can only be in one team, and all members of a
                    team must share a tutorial time.</p>
+                <!-- Optional rule. Off by default: most units never use it, and a
+                     unit with it off shows nothing about newcomers anywhere. -->
+                <div class="t-rule-toggle">
+                    <label class="t-rule-toggle-label" for="capNewToQut">
+                        <input type="checkbox" id="capNewToQut" onchange="onCapToggle()">
+                        Limit new-to-QUT students per team
+                    </label>
+                    <span class="t-rule-toggle-num" id="capNewToQutNum" hidden>
+                        <label for="maxNewToQut">Maximum</label>
+                        <input class="t-input t-size-input" id="maxNewToQut" type="number" min="1" value="2">
+                    </span>
+                </div>
             </div>
         </div>
 
@@ -131,6 +143,10 @@
         document.getElementById('roster-example').innerHTML = rosterExampleHtml();
     })();
 
+    function onCapToggle() {
+        document.getElementById('capNewToQutNum').hidden = !document.getElementById('capNewToQut').checked;
+    }
+
     function onCsvSelected(input) {
         const file = input.files[0];
         const countEl = document.getElementById('csvCount');
@@ -166,10 +182,18 @@
         if (!(minSize >= 1))    { errEl.textContent = 'Minimum team size must be at least 1.'; return; }
         if (!(maxSize >= minSize)) { errEl.textContent = 'Maximum team size must be at least the minimum.'; return; }
 
+        // null on the wire means "no cap" — the server stores 0.
+        let maxNewToQut = null;
+        if (document.getElementById('capNewToQut').checked) {
+            maxNewToQut = parseInt(document.getElementById('maxNewToQut').value, 10);
+            if (!(maxNewToQut >= 1)) { errEl.textContent = 'The new-to-QUT limit must be at least 1.'; return; }
+        }
+
         try {
             const r = await post('/api/units', {
                 unitName, description, semester, deadline,
                 validTeamSizes: sizesCsvFromRange(minSize, maxSize),
+                maxNewToQut,
                 students:       state.students
             });
             // The unit exists either way, so this reports rather than blocks —

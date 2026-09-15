@@ -34,7 +34,7 @@ class UnitRosterRepository extends BaseRepository {
   // from the CSV, and the panel has no use for it.
   listForUnitWithJoined(unitId) {
     return this.all(
-      `SELECT r.id, r.unit_id, r.email, r.name, r.tutorial_time,
+      `SELECT r.id, r.unit_id, r.email, r.name, r.tutorial_time, r.is_new_to_qut,
               r.degree, r.major, r.minor, r.invited_at,
               CASE WHEN EXISTS (
                 SELECT 1 FROM users u
@@ -63,14 +63,16 @@ class UnitRosterRepository extends BaseRepository {
   // Every field is merged rather than overwritten — a blank incoming value keeps
   // whatever is already stored. Without that, a later top-up listing only emails
   // would silently wipe the names and tutorial times an earlier richer import
-  // had set. The integer column is passed as NULL (not 0) when absent, because
-  // 0 is a real value and cannot double as "not supplied".
+  // had set. The two integer columns are passed as NULL (not 0) when absent,
+  // because 0 is a real value for both and cannot double as "not supplied".
   //
-  // `is_new_to_qut` is a retired column (it fed the removed new-to-QUT cap):
-  // it is not imported, so the CSV parser no longer even looks for it.
+  // `is_new_to_qut` is imported whether or not the unit enforces a cap on it:
+  // the coordinator balances newcomers by hand and needs the flag regardless.
   upsertMany(unitId, entries, invitedAt) {
     let added = 0, updated = 0, skipped = 0;
     const text = v => String(v ?? '').trim();
+    const flag = v => (v === undefined || v === null || String(v).trim() === ''
+      ? null : (String(v) === '1' || v === true || String(v).trim().toLowerCase() === 'yes' ? 1 : 0));
     const num = v => {
       if (v === undefined || v === null || String(v).trim() === '') return null;
       const n = parseInt(v);
@@ -82,18 +84,20 @@ class UnitRosterRepository extends BaseRepository {
       if (!email || !email.includes('@')) { skipped++; continue; }
       const existing = !!this.findByEmail(unitId, email);
       // NULL means "keep what is stored", which only makes sense for a row that
-      // already exists. A brand-new row takes the column default instead, so
-      // the integer column is never left null.
+      // already exists. A brand-new row takes the column defaults instead, so
+      // the two integer columns are never left null.
+      const newToQut = existing ? flag(s.is_new_to_qut) : (flag(s.is_new_to_qut) ?? 0);
       const unitsPassed = existing ? num(s.units_passed) : (num(s.units_passed) ?? 0);
       this.run(
         `INSERT INTO unit_roster
-           (unit_id, email, name, student_number, tutorial_time,
+           (unit_id, email, name, student_number, tutorial_time, is_new_to_qut,
             degree, major, minor, units_passed, it_skill_groups, invited_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(unit_id, email) DO UPDATE SET
            name            = COALESCE(NULLIF(excluded.name, ''),            unit_roster.name),
            student_number  = COALESCE(NULLIF(excluded.student_number, ''),  unit_roster.student_number),
            tutorial_time   = COALESCE(NULLIF(excluded.tutorial_time, ''),   unit_roster.tutorial_time),
+           is_new_to_qut   = COALESCE(excluded.is_new_to_qut,               unit_roster.is_new_to_qut),
            degree          = COALESCE(NULLIF(excluded.degree, ''),          unit_roster.degree),
            major           = COALESCE(NULLIF(excluded.major, ''),           unit_roster.major),
            minor           = COALESCE(NULLIF(excluded.minor, ''),           unit_roster.minor),
@@ -102,6 +106,7 @@ class UnitRosterRepository extends BaseRepository {
         [unitId, email,
          text(s.name), text(s.student_id || s.student_number),
          text(s.tutorial_time),
+         newToQut,
          text(s.degree), text(s.major), text(s.minor),
          unitsPassed, text(s.it_skill_groups),
          invitedAt]
