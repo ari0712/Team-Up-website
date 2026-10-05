@@ -139,6 +139,10 @@
         }
         .cl-modal-field { font-size: 13px; color: #555; margin: 6px 0; }
         .cl-modal-field strong { color: #1a2a4a; }
+        .cl-full-profile-link {
+            font-size: 13px; font-weight: 700; color: #2663ff; text-decoration: none;
+        }
+        .cl-full-profile-link:hover { text-decoration: underline; }
     </style>
 </head>
 <body class="t-page">
@@ -494,6 +498,13 @@
             <div class="cl-modal-field"><strong>Skills:</strong> ${s.skills || 'Not yet filled in'}</div>
             <div class="cl-modal-field"><strong>Preferred role:</strong> ${s.preferred_role || 'Not yet filled in'}</div>
             <div class="cl-modal-field"><strong>Project interests:</strong> ${s.project_interests || 'Not yet filled in'}</div>
+            <!-- The modal is the quick glance; the About Me answers the student
+                 wrote are several paragraphs each and live on their own page. -->
+            <div style="margin-top:12px">
+                <a class="cl-full-profile-link"
+                   href="/teacher/student-profile.html?unitId=${encodeURIComponent(unitId)}&studentId=${encodeURIComponent(s.student_id)}&from=class-list"
+                >View full profile &rarr;</a>
+            </div>
             <div style="margin-top:16px">
                 ${STAGES.map(st => {
             const done   = s[st.key] == 1;

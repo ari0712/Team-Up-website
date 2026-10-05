@@ -130,6 +130,9 @@
             color: #888;
             margin-top: -4px;
         }
+        .tf-newtab { color:#9bb8d4; font-size:11px }
+        .tf-member-link { color:#1a2a4a;text-decoration:none;border-bottom:1px dotted #9bb8d4 }
+        .tf-member-link:hover { color:#2663ff;border-bottom-color:#2663ff }
         .tf-member-row {
             display: flex;
             gap: 10px;
@@ -303,8 +306,28 @@
         // Unit first: the team cards word their size against the unit's target.
         await loadLockPanel();
         await loadTeams();
+        restoreView();
         await loadBatches();
     })();
+
+    // Coming back from a student's full profile: pick up the tab and the open
+    // team dialog the coordinator left behind, so reading through a team member
+    // by member does not mean finding the team again every time.
+    //
+    // Both helpers below re-render from `allTeams`, so this needs no state of
+    // its own — and a team dissolved while the profile was open simply does not
+    // match, leaving the plain page rather than an error.
+    function restoreView() {
+        const tab = params.get('tab');
+        const team = params.get('team');
+        if (tab && STATUS_GROUPS.some(g => g.key === tab)) selectStatus(tab);
+        if (team && allTeams.some(t => t.team_id === team)) viewTeam(team);
+        // Spent: a later refresh or a bookmark should give the plain page, not
+        // reopen a dialog the coordinator has since closed.
+        if (tab || team) {
+            history.replaceState({}, '', `${location.pathname}?unitId=${encodeURIComponent(unitId)}`);
+        }
+    }
 
     // ── Deadline lock + organiser ────────────────────────────────────────
     // `locked` is derived from the unit's deadline, exactly as the server does
@@ -408,6 +431,26 @@
         }
     }
 
+    // A student's name, linked to their full profile (photo + About Me). Same
+    // affordance the students get on My Team: a dotted underline, not a button.
+    //
+    // `returnTo` is a team id: the profile page hands it back on its Back button
+    // so the coordinator lands on the tab they were on with that team's dialog
+    // reopened, instead of having to hunt the team down again per member.
+    //
+    // `newTab` is for the organiser only. Its draft lives in memory and carries
+    // the coordinator's manual moves — navigating away throws that work out, and
+    // no Back button can rebuild it, so those links leave the page where it is.
+    function profileLink(m, { returnTo = null, newTab = false } = {}) {
+        const q = new URLSearchParams({
+            unitId, studentId: m.student_id, from: 'team-formation',
+        });
+        if (returnTo) { q.set('tab', activeStatus); q.set('team', returnTo); }
+        return `<a class="tf-member-link" href="/teacher/student-profile.html?${q}"${
+            newTab ? ' target="_blank" rel="noopener" title="Opens in a new tab"' : ''
+        }>${esc(m.name || m.student_id)}${newTab ? ' <span class="tf-newtab">↗</span>' : ''}</a>`;
+    }
+
     function draftValidation(members) {
         const sizes = String(draft.meta.valid_team_sizes || '4').split(',')
             .map(n => parseInt(n)).filter(Boolean);
@@ -455,7 +498,7 @@
                 </div>
                 ${g.members.map(m => `
                     <div class="tf-org-member">
-                        <span class="tf-org-name">${esc(m.name || m.student_id)}
+                        <span class="tf-org-name">${profileLink(m, { newTab: true })}
                             <span class="tf-org-role">${esc(m.preferred_role || 'no role')}</span>${
                             t.locked?.has(m.student_id) ? '<span class="tf-org-lock" title="Part of a recorded group — moves with it">🔒</span>' : ''}</span>
                         <select class="tf-org-move" onchange="moveStudent('${esc(m.student_id)}', this.value)">
@@ -480,7 +523,7 @@
                     : 'These students will keep their current team unless you place them.'}</div>
                 ${draft.unassigned.map(m => `
                     <div class="tf-org-member">
-                        <span class="tf-org-name">${esc(m.name || m.student_id)}
+                        <span class="tf-org-name">${profileLink(m, { newTab: true })}
                             <span class="tf-org-role">${esc(m.preferred_role || 'no role')}</span></span>
                         <select class="tf-org-move" onchange="moveStudent('${esc(m.student_id)}', this.value)">
                             ${options(null)}
@@ -769,7 +812,7 @@
             ${team.members.map((m, i) => `
                 <div class="tf-member-row">
                     <span style="min-width:18px;color:#888">${i+1}.</span>
-                    <span style="flex:1;font-weight:600">${m.name || m.student_id}</span>
+                    <span style="flex:1;font-weight:600">${profileLink(m, { returnTo: teamId })}</span>
                     <span style="color:#555;min-width:120px">${m.role || '—'}</span>
                 </div>`).join('')}
             <div style="margin-top:16px;font-size:13px;color:#555">

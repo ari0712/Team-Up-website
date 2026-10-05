@@ -3,6 +3,7 @@ const ServiceError = require('./ServiceError');
 const { parseTeamSizesCsv } = require('../utils/teamSizes');
 const { validateTeam, targetSizeLabel } = require('../utils/teamValidator');
 const { placementOf, PLACEMENTS, PLACEMENT_LABELS } = require('../utils/placement');
+const { buildStudentProfile } = require('../utils/studentProfile');
 const { isLocked } = require('../utils/deadline');
 const { AT_RISK_CHOICES, AT_RISK_DEFAULT } = require('./notificationService');
 
@@ -43,8 +44,9 @@ function parseNewToQutCap(value) {
 // revert that batch as a unit.
 class UnitService {
   constructor({ units, enrollment, roster, progress, teams, prefs, slots,
-                batches, teamRequestService, userRepo }) {
+                batches, teamRequestService, userRepo, studentRepo }) {
     this.users = userRepo;
+    this.studentRepo = studentRepo;
     this.units = units;
     this.enrollment = enrollment;
     this.roster = roster;
@@ -482,6 +484,31 @@ class UnitService {
   getClassList(unitId, teacherId) {
     this._ownedOr404(unitId, teacherId);
     return this._classListWithPlacement(unitId);
+  }
+
+  // One student's full profile — photo, header and the About Me answers — for a
+  // coordinator who owns the unit. Read-only: the text is the student's, and
+  // nothing here writes.
+  //
+  // Same shape the student portal serves (utils/studentProfile.js), so the
+  // teacher page and the classmate page can never show different things. The
+  // email IS included: a teacher already has every address in the class list
+  // and the export, so withholding it here would be theatre.
+  getStudentProfile(unitId, teacherId, studentId) {
+    this._ownedOr404(unitId, teacherId);
+    // Rostered is not enrolled: someone who has never joined has no profile,
+    // and saying so is better than rendering a page of empty prompts.
+    if (!this.enrollment.isEnrolled(unitId, studentId))
+      throw new ServiceError('That student is not in this unit', 404);
+
+    return buildStudentProfile({
+      studentId,
+      isSelf: false,
+      name: this.enrollment.getName(unitId, studentId) || studentId,
+      prefs: this.prefs.get(unitId, studentId) || {},
+      account: this.studentRepo.findByUsername(studentId),
+      includeEmail: true,
+    });
   }
 
   _classListWithPlacement(unitId) {

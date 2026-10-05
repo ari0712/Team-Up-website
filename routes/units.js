@@ -73,6 +73,13 @@ module.exports = function createUnitsRouter({ unitService, matchingService }) {
   router.get('/:unitId/class-list', requireTeacher, (req, res) =>
     send(res, () => res.json(svc.getClassList(req.params.unitId, username(req)))));
 
+  // One student's full profile (photo + About Me), for a unit the caller owns.
+  // The student portal has its own copy of this for classmates; both return the
+  // same shape, built by utils/studentProfile.js.
+  router.get('/:unitId/students/:studentId/profile', requireTeacher, (req, res) =>
+    send(res, () => res.json(
+      svc.getStudentProfile(req.params.unitId, username(req), req.params.studentId))));
+
   // The coordinator's report, as rows. The page renders and downloads exactly
   // what this returns.
   router.get('/:unitId/export', requireTeacher, (req, res) =>

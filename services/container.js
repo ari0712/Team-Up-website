@@ -61,7 +61,7 @@ function createServices({ db, transport, env = process.env }) {
   });
   const unitService = new UnitService({
     units: unitRepo, enrollment, roster, progress, teams, prefs, slots,
-    batches, teamRequestService, userRepo
+    batches, teamRequestService, userRepo, studentRepo
   });
 
   return {

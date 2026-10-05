@@ -5,73 +5,7 @@
     <title>Full Profile - TeamUp</title>
     <link rel="stylesheet" href="/assets/css/style1.css">
     <link rel="stylesheet" href="/assets/css/teacher-style.css">
-    <style>
-        body.t-page { min-height: 100vh; height: auto; overflow: visible; }
-        .t-dashboard-layout { min-height: auto; }
-        .fp-shell { flex: 1; min-width: 0; background: #d3ecf5; padding: 34px 48px 40px; }
-        .fp-card {
-            background: #fff; border-radius: 8px; padding: 30px 48px 34px;
-            color: #2a3a4a; max-width: 860px; height: auto;
-        }
-
-        /* Identity header */
-        .fp-head { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 6px }
-        .fp-avatar, .fp-initials {
-            width: 96px; height: 96px; border-radius: 50%; flex-shrink: 0;
-            object-fit: cover; border: 2px solid #d0dff0; background: #eef4ff;
-        }
-        .fp-initials {
-            display: flex; align-items: center; justify-content: center;
-            font-size: 32px; font-weight: 800; color: #2663ff; letter-spacing: 1px;
-        }
-        .fp-name { font-size: 22px; font-weight: 800; color: #1a2a4a; margin-bottom: 4px }
-        .fp-id { font-size: 13px; font-weight: 600; color: #666; white-space: nowrap }
-        .fp-role { font-size: 13px; font-weight: 600; color: #555 }
-        .fp-tags { font-size: 12px; color: #777; margin-top: 6px; line-height: 1.6 }
-
-        .fp-divider { border: none; border-top: 1px solid #e6eef8; margin: 22px 0 }
-
-        /* One About Me answer */
-        .fp-section { margin-bottom: 24px }
-        .fp-section-title {
-            background: #7ec8e3; border-radius: 8px; padding: 7px 14px; display: inline-block;
-            font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 10px;
-        }
-        .fp-prose { font-size: 14px; line-height: 1.65; color: #333; white-space: normal }
-        .fp-prose p { margin: 0 0 10px }
-        .fp-prose p:last-child { margin-bottom: 0 }
-        /* A blank answer stays visible and greyed: an absent section reads as a
-           broken page, an explicit "not filled in" reads as a choice. */
-        .fp-empty { font-size: 14px; color: #999; font-style: italic }
-
-        /* Edit mode */
-        .fp-textarea {
-            width: 100%; box-sizing: border-box; min-height: 96px; resize: vertical;
-            border: 1.5px solid #d0dff0; border-radius: 8px; padding: 10px 12px;
-            font-size: 14px; font-family: inherit; line-height: 1.6; outline: none;
-        }
-        .fp-textarea:focus { border-color: #2663ff }
-        .fp-count { font-size: 12px; color: #999; margin-top: 4px; text-align: right }
-        .fp-count.over { color: #e94560; font-weight: 700 }
-        .fp-actions { display: flex; gap: 12px; margin-top: 26px; flex-wrap: wrap }
-        .fp-photo-controls {
-            margin-top: 12px; padding-top: 10px; border-top: 1px solid #eef4fb;
-        }
-        .fp-photo-label {
-            display: block; font-size: 12px; font-weight: 800; letter-spacing: .3px;
-            text-transform: uppercase; color: #1a2a4a; margin-bottom: 6px;
-        }
-        .fp-photo-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
-        .fp-photo-note { font-size: 12px; color: #777; margin-top: 6px; line-height: 1.5 }
-        .fp-photo-note.warn { color: #c0392b; font-weight: 600 }
-        .fp-btn-sm {
-            background: #fff; color: #2663ff; border: 1.5px solid #2663ff; border-radius: 8px;
-            padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
-        }
-        .fp-btn-sm.danger { color: #c0392b; border-color: #c0392b }
-        .fp-msg { font-size: 13px; font-weight: 600; margin-top: 12px; min-height: 18px }
-        .fp-hint { font-size: 12px; color: #5a7a9a; line-height: 1.55; margin-bottom: 18px }
-    </style>
+    <link rel="stylesheet" href="/assets/css/profile.css">
 </head>
 <body class="t-page">
 <header class="t-header">
@@ -94,6 +28,7 @@
 </div>
 <script src="/assets/js/api.js"></script>
 <script src="/assets/js/student-nav.js"></script>
+<script src="/assets/js/profile-view.js"></script>
 <script>
     let unitId, viewedId, profile;
     let editing = false;
@@ -113,42 +48,6 @@
         'find-teammates': { href: '/student/find-teammates.html', back: 'Back to Find Teammates' },
         'my-team':        { href: '/student/my-team.html',        back: 'Back to My Team' },
     };
-
-    const esc = value => String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#039;');
-
-    // Escaping alone would collapse the student's paragraphs into one block, so
-    // blank lines become paragraph breaks and single newlines become <br>.
-    function prose(text) {
-        const paragraphs = esc(text).split(/\n{2,}/)
-            .map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
-        return `<div class="fp-prose">${paragraphs}</div>`;
-    }
-
-    function initials(name) {
-        const parts = String(name || '?').trim().split(/\s+/).filter(Boolean);
-        return ((parts[0]?.[0] || '?') + (parts.length > 1 ? parts[parts.length - 1][0] : ''))
-            .toUpperCase();
-    }
-
-    // A missing file does NOT 404 here — the server's catch-all returns index.html
-    // with a 200 — so a broken image has to be caught with onerror rather than by
-    // checking the response.
-    function avatarHtml(src, name) {
-        if (!src) return `<div class="fp-initials">${esc(initials(name))}</div>`;
-        return `<img class="fp-avatar" src="${esc(src)}" alt=""
-                     onerror="this.outerHTML='&lt;div class=&quot;fp-initials&quot;&gt;${esc(initials(name))}&lt;/div&gt;'">`;
-    }
-
-    function tagLine(label, csv) {
-        const items = String(csv || '').split(',').map(s => s.trim()).filter(Boolean);
-        if (!items.length) return '';
-        return `<div class="fp-tags"><strong>${esc(label)}:</strong> ${esc(items.join(' · '))}</div>`;
-    }
 
     // Photo controls, spelled out rather than left as two bare buttons.
     //
@@ -181,46 +80,36 @@
       </div>`;
     }
 
+    // The identity block is the shared one (profile-view.js); only the photo
+    // controls are this page's, and only while editing.
     function headerHtml() {
         const src = pendingAvatar !== null ? pendingAvatar : profile.avatarPath;
-        return `
-      <div class="fp-head">
-        ${avatarHtml(src, profile.name)}
-        <div style="min-width:0">
-          <div class="fp-name">${esc(profile.name)}${
-              profile.email ? `<span class="fp-id"> – ${esc(profile.email)}</span>` : ''}</div>
-          <div class="fp-role">Preferred Role: ${esc(profile.preferredRole || 'Not set')}</div>
-          ${tagLine('Tutorial availability', profile.tutorialSlots)}
-          ${tagLine('Skills', profile.skills)}
-          ${tagLine('Interests', profile.projectInterests)}
-          ${editing ? photoControlsHtml(src) : ''}
-        </div>
-      </div>`;
+        return profileHeaderHtml(profile, {
+            src, extraHtml: editing ? photoControlsHtml(src) : ''
+        });
     }
 
     function render() {
         const backHref = `${ORIGINS[origin].href}?unitId=${unitId}`;
 
-        const body = profile.about.map(field => `
+        const body = editing
+            ? profile.about.map(field => `
       <div class="fp-section">
         <div class="fp-section-title">${esc(field.label)}</div>
-        ${editing ? `
-          <textarea class="fp-textarea" id="fld-${esc(field.key)}" maxlength="2000"
-                    oninput="updateCount('${esc(field.key)}')"
-                    placeholder="Optional — leave blank if you'd rather not say.">${esc(field.value)}</textarea>
-          <div class="fp-count" id="cnt-${esc(field.key)}"></div>`
-          : (field.value.trim()
-              ? prose(field.value)
-              : `<div class="fp-empty">Not filled in yet</div>`)}
-      </div>`).join('');
+        <textarea class="fp-textarea" id="fld-${esc(field.key)}" maxlength="2000"
+                  oninput="updateCount('${esc(field.key)}')"
+                  placeholder="Optional — leave blank if you'd rather not say.">${esc(field.value)}</textarea>
+        <div class="fp-count" id="cnt-${esc(field.key)}"></div>
+      </div>`).join('')
+            : profileAboutHtml(profile.about);
 
         document.getElementById('fp-card').innerHTML = `
       ${headerHtml()}
       <hr class="fp-divider">
       ${editing
           ? `<p class="fp-hint">Every question below is optional — fill in what you want your
-               classmates to know and leave the rest blank. This stays editable even after your
-               team is finalised.</p>`
+               classmates and your teaching team to know, and leave the rest blank. This stays
+               editable even after your team is finalised.</p>`
           : ''}
       ${body}
       <div class="fp-actions">

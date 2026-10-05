@@ -29,9 +29,10 @@ describe('authorization — ids in the URL are checked against the caller', () =
     // The owner still can.
     h.unitService.overrideTeam(unitA, teacherA, teamA.team_id, 'finalise');
     assert.equal(h.teamOf(unitA, a1).status, 'FINALISED');
-    // And batches / previews are ownership-scoped too.
+    // And batches / previews / profiles are ownership-scoped too.
     expectServiceError(() => h.unitService.listFinaliseBatches(unitA, teacherB), 404);
     expectServiceError(() => h.unitService.previewRulesImpact(unitA, teacherB, {}), 404);
+    expectServiceError(() => h.unitService.getStudentProfile(unitA, teacherB, a1), 404);
   });
 
   test('A3: kick is scoped to the unit in the URL; no team-of-one is created in the wrong unit', () => {

@@ -4,6 +4,7 @@ const { validateTeam, targetSizeLabel } = require('../utils/teamValidator');
 const { placementOf } = require('../utils/placement');
 const { matchesStudent, normalise } = require('../utils/studentSearch');
 const { CATEGORIES, CATEGORY_LABELS } = require('../utils/emailCategories');
+const { buildStudentProfile } = require('../utils/studentProfile');
 
 // Classmate search rate limit: per (student, unit), sliding window.
 //
@@ -155,26 +156,18 @@ class StudentPortalService {
     if (!this.enrollment.isEnrolled(unitId, studentId))
       throw new ServiceError('That student is not in this unit', 404);
 
-    const prefs = this.prefs.get(unitId, studentId) || {};
-    const account = this.studentRepo.findByUsername(studentId);
-
     const isSelf = studentId === viewerId;
-    return {
+    return buildStudentProfile({
       studentId,
       isSelf,
       name: this.enrollment.getName(unitId, studentId) || studentId,
+      prefs: this.prefs.get(unitId, studentId) || {},
+      account: this.studentRepo.findByUsername(studentId),
       // Your own address, never a classmate's: a classmate's email reaches a
       // viewer through exactly one path — the shared-name case on the Find
       // Teammates card. The student number is never returned here.
-      ...(isSelf ? { email: account?.email || '' } : {}),
-
-      avatarPath: account?.avatarPath || '',
-      preferredRole: prefs.preferred_role || '',
-      tutorialSlots: prefs.tutorial_slots || '',
-      projectInterests: prefs.project_interests || '',
-      skills: prefs.skills || '',
-      about: ABOUT_FIELDS.map(f => ({ ...f, value: prefs[f.key] || '' })),
-    };
+      includeEmail: isSelf,
+    });
   }
 
   // Saves the About Me text. Every field is optional, so an all-blank save is
