@@ -460,22 +460,6 @@ body.t-page {
     align-items: center;
     gap: 10px;
 }
-.t-carousel-chevron {
-    width: 34px;
-    height: 34px;
-    background: rgba(255,255,255,0.8);
-    border: 1.5px solid #b0c8e0;
-    border-radius: 50%;
-    font-size: 22px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    color: #3d4f6e;
-    transition: background 0.12s;
-}
-.t-carousel-chevron:hover { background: white; }
 
 /* ── Unit info card ── */
 .t-unit-info-card {
