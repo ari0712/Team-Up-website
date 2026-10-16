@@ -1,0 +1,44 @@
+# Runs the test suite on GitHub for every push and every pull request.
+#
+# The suite is self-contained: each test builds its own throwaway database
+# through test/helpers/harness.js, so the runner needs no teamup.db, no .env
+# and no services — just the dependencies and `npm test`.
+#
+# Node 24 matches what the project is developed on. It also matters: the test
+# script passes a glob ("test/*.test.js") to `node --test`, which only expands
+# patterns itself from Node 21 onwards. On an older runtime the quoted glob is
+# read as a literal filename and the whole suite silently finds nothing.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A fresh push to the same branch makes the previous run irrelevant, so stop it
+# rather than paying for two answers to the same question.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # `npm ci` not `npm install`: it installs exactly what package-lock.json
+      # pins, so a run can never pass against versions nobody has committed.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
