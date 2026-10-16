@@ -505,6 +505,16 @@ This is a student project / prototype, not production-hardened software:
   which is fine for a class-sized dataset but not for high concurrency.
 - Auto-matching (`services/matchingService.js`) suggests only; it does not consider
   tutorial load balance across teams.
+- **Old commits still contain a database.** `teamup.db` is git-ignored now (since
+  `921353e`), but commits made before that, and a branch commit as late as `3df210a`
+  (11 Aug 2026), still hold copies of it: account usernames, email addresses and
+  password hashes. The hashes are unsalted SHA-256 (`services/authService.js`), which
+  is quick to reverse for common passwords, so treat any password used on a development
+  copy of TeamUp as exposed and do not reuse it elsewhere. The history was deliberately
+  not rewritten before handover. Doing so changes every commit ID and forces everyone
+  to re-clone. Before any real deployment, purge the file from the history (for
+  example with `git filter-repo --path teamup.db --invert-paths`) and replace the
+  password hashing with a salted, slow hash such as scrypt, or with university SSO.
 
 ## License
 
